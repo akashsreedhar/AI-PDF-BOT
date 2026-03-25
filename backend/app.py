@@ -1,7 +1,9 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routers.users import router
 from database import init_db
+from config import ALLOWED_ORIGINS
 
 # Initialize database before app startup
 @asynccontextmanager
@@ -18,6 +20,14 @@ app = FastAPI(
     version="1.0.0",
     description="AI PDF Bot - Backend API with SQLite/Cloud SQL support",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(router, prefix="/api", tags=["users"])
