@@ -14,20 +14,20 @@ export default function AuthForm({ type, onSubmit, isLoading, error }: AuthFormP
   return (
     <form
       onSubmit={onSubmit}
-      className="w-full max-w-md bg-white/90 rounded-2xl shadow-xl p-8 flex flex-col gap-6 border border-gray-100 backdrop-blur"
+      className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 flex flex-col gap-6 border border-gray-200"
       autoComplete="off"
     >
       <h2 className="text-2xl font-bold text-gray-900 mb-2 text-center">
         {isLogin ? "Sign in to your account" : "Create your account"}
       </h2>
-      {error && <div className="text-red-600 text-sm text-center">{error}</div>}
+      {error && <div className="text-red-600 text-sm text-center bg-red-50 rounded-lg py-2 px-3">{error}</div>}
       <div className="flex flex-col gap-4">
         {!isLogin && (
           <input
             type="text"
             name="name"
             placeholder="Full Name"
-            className="input input-bordered w-full rounded-lg px-4 py-3 border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+            className="w-full rounded-lg px-4 py-3 border border-gray-300 bg-white text-gray-900 placeholder-gray-400 text-base focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition"
             required
           />
         )}
@@ -35,20 +35,20 @@ export default function AuthForm({ type, onSubmit, isLoading, error }: AuthFormP
           type="email"
           name="email"
           placeholder="Email address"
-          className="input input-bordered w-full rounded-lg px-4 py-3 border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+          className="w-full rounded-lg px-4 py-3 border border-gray-300 bg-white text-gray-900 placeholder-gray-400 text-base focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition"
           required
         />
         <input
           type="password"
           name="password"
           placeholder="Password"
-          className="input input-bordered w-full rounded-lg px-4 py-3 border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+          className="w-full rounded-lg px-4 py-3 border border-gray-300 bg-white text-gray-900 placeholder-gray-400 text-base focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition"
           required
         />
       </div>
       <button
         type="submit"
-        className="w-full py-3 rounded-lg bg-primary text-white font-semibold text-lg shadow hover:bg-primary/90 transition-colors disabled:opacity-60"
+        className="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold text-lg shadow hover:bg-indigo-700 transition-colors disabled:opacity-60 cursor-pointer"
         disabled={isLoading}
       >
         {isLogin ? (isLoading ? "Signing in..." : "Sign In") : isLoading ? "Signing up..." : "Sign Up"}
@@ -57,12 +57,12 @@ export default function AuthForm({ type, onSubmit, isLoading, error }: AuthFormP
         {isLogin ? (
           <>
             Don&apos;t have an account?{' '}
-            <Link href="/signup" className="text-primary font-medium hover:underline">Sign up</Link>
+            <Link href="/signup" className="text-indigo-600 font-medium hover:underline">Sign up</Link>
           </>
         ) : (
           <>
             Already have an account?{' '}
-            <Link href="/login" className="text-primary font-medium hover:underline">Sign in</Link>
+            <Link href="/login" className="text-indigo-600 font-medium hover:underline">Sign in</Link>
           </>
         )}
       </div>
