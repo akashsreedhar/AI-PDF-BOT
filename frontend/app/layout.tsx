@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Document Chatbot",
-  description: "Chat with your documents using AI",
+  title: "AI Doc Chat — Chat with your documents",
+  description: "Upload PDFs and chat with them using AI",
 };
 
 export default function RootLayout({
@@ -29,9 +29,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="bg-gradient-to-br from-gray-50 via-white to-indigo-50 min-h-screen text-gray-900 font-sans">
+      <body className="bg-[#050517] min-h-screen text-white font-sans overflow-x-hidden">
         <Navbar />
-        <main className="max-w-5xl mx-auto px-4 py-8 flex-1 w-full">{children}</main>
+        <main className="flex-1 w-full">{children}</main>
       </body>
     </html>
   );
