@@ -53,3 +53,4 @@ export default function AuthForm({ type, onSubmit, isLoading, error }: AuthFormP
     </form>
   );
 }
+
