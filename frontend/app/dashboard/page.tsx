@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getDocuments, uploadDocuments, deleteDocument, Document } from "@/services/documents";
 import { sendChatMessage, getChatHistory, Message, ConversationRecord } from "@/services/chat";
+import MarkdownMessage from "@/components/MarkdownMessage";
 
 const quickActions = [
   {
@@ -92,6 +93,11 @@ export default function DashboardPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ConversationRecord[]>([]);
 
+  // Toast
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "error" | "loading" | "">("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const fetchDocuments = async (token: string) => {
     setDocsLoading(true);
     try {
@@ -160,17 +166,29 @@ export default function DashboardPage() {
     router.replace("/login");
   };
 
+  const showToast = (msg: string, type: "success" | "error" | "loading") => {
+    setToastMessage(msg);
+    setToastType(type);
+    if (type !== "loading") {
+      setTimeout(() => { setToastMessage(""); setToastType(""); }, 3500);
+    }
+  };
+
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const token = localStorage.getItem("jwt");
     if (!token) return;
     setUploading(true);
     setUploadError("");
+    showToast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`, "loading");
     try {
       await uploadDocuments(Array.from(files), token);
       await fetchDocuments(token);
+      showToast("Document uploaded successfully!", "success");
     } catch (e: unknown) {
-      setUploadError(e instanceof Error ? e.message : "Upload failed");
+      const msg = e instanceof Error ? e.message : "Upload failed";
+      setUploadError(msg);
+      showToast(msg, "error");
     } finally {
       setUploading(false);
     }
@@ -184,6 +202,43 @@ export default function DashboardPage() {
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
       if (selectedDocId === docId) setSelectedDocId(documents.find((d) => d.id !== docId)?.id ?? null);
     } catch { /* ignore */ }
+  };
+
+  const handleNewChat = () => {
+    setChatMessages([
+      { role: "assistant", content: "Hello! Upload a document and I\u2019ll help you extract insights instantly. ✨" },
+    ]);
+    setChatInput("");
+    setChatError("");
+    setChatTab("chat");
+  };
+
+  const handleSummarize = async () => {
+    if (!selectedDocId) {
+      showToast("Please select a document first to summarize.", "error");
+      return;
+    }
+    const token = localStorage.getItem("jwt");
+    if (!token) return;
+    setChatTab("chat");
+    const summaryQuestion = "Please provide a comprehensive summary of this document. Include: (1) The main topic and purpose, (2) Key points and findings, (3) Any important data or details, (4) Conclusions or recommendations.";
+    setChatInput("");
+    setChatError("");
+    setChatMessages((prev) => [...prev, { role: "user", content: "📋 Summarize this document" }]);
+    setChatLoading(true);
+    try {
+      const res = await sendChatMessage({
+        documentId: selectedDocId,
+        question: summaryQuestion,
+        conversationHistory: [],
+        token,
+      });
+      setChatMessages((prev) => [...prev, { role: "assistant", content: res.answer }]);
+    } catch (e: unknown) {
+      setChatError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleSendChat = async () => {
@@ -227,9 +282,62 @@ export default function DashboardPage() {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const filteredDocs = searchQuery
+    ? documents.filter(d => d.filename.toLowerCase().includes(searchQuery.toLowerCase()))
+    : documents;
 
   return (
     <div className="relative min-h-screen overflow-hidden">
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        multiple
+        accept=".pdf,.txt"
+        className="hidden"
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }}
+      />
+
+      {/* Toast notification */}
+      {toastMessage && (
+        <div
+          className="fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl transition-all duration-300 animate-fade-up"
+          style={{
+            maxWidth: "360px",
+            background: toastType === "success" ? "rgba(16,185,129,0.12)" : toastType === "error" ? "rgba(239,68,68,0.12)" : "rgba(12,12,30,0.92)",
+            border: `1px solid ${toastType === "success" ? "rgba(16,185,129,0.45)" : toastType === "error" ? "rgba(239,68,68,0.45)" : "rgba(99,102,241,0.45)"}`,
+            backdropFilter: "blur(24px)",
+          }}
+        >
+          {toastType === "loading" && (
+            <svg className="animate-spin flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="#6366f1" strokeWidth="2.5" strokeDasharray="60" strokeDashoffset="20"/>
+            </svg>
+          )}
+          {toastType === "success" && (
+            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{background:"rgba(16,185,129,0.2)"}}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><polyline points="20,6 9,17 4,12" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+          )}
+          {toastType === "error" && (
+            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{background:"rgba(239,68,68,0.2)"}}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><line x1="18" y1="6" x2="6" y2="18" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round"/></svg>
+            </div>
+          )}
+          <span className={`text-sm font-medium ${
+            toastType === "success" ? "text-emerald-300" : toastType === "error" ? "text-red-300" : "text-white/90"
+          }`}>{toastMessage}</span>
+          {toastType !== "loading" && (
+            <button onClick={() => setToastMessage("")} className="ml-auto text-white/30 hover:text-white/60 transition-colors flex-shrink-0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Ambient background */}
       <div className="pointer-events-none fixed inset-0">
         <div className="animate-orb-1 absolute" style={{top:"-20%",left:"-5%",width:"700px",height:"700px",borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,0.1) 0%,transparent 70%)",filter:"blur(60px)"}}/>
@@ -254,6 +362,7 @@ export default function DashboardPage() {
                 </svg>
               </div>
               <input
+                ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search documents..."
@@ -324,6 +433,9 @@ export default function DashboardPage() {
                     key={i}
                     onClick={() => {
                       if (a.action === "upload") fileInputRef.current?.click();
+                      else if (a.action === "chat") handleNewChat();
+                      else if (a.action === "search") searchInputRef.current?.focus();
+                      else if (a.action === "summarize") handleSummarize();
                     }}
                     className="glass-card rounded-2xl p-4 flex flex-col items-center gap-2.5 text-center group transition-all duration-300 cursor-pointer"
                     style={{borderColor:`${a.color}22`}}
@@ -349,16 +461,23 @@ export default function DashboardPage() {
               {!docsLoading && documents.length === 0 && (
                 <p className="text-xs text-white/30 py-4 text-center">No documents yet. Upload a PDF or TXT to get started.</p>
               )}
+              {!docsLoading && documents.length > 0 && filteredDocs.length === 0 && (
+                <p className="text-xs text-white/30 py-4 text-center">No results for &quot;{searchQuery}&quot;</p>
+              )}
               <div className="space-y-2.5">
-                {documents.map((doc, i) => {
+                {filteredDocs.map((doc, i) => {
                   const colors = ["#6366f1","#8b5cf6","#06b6d4","#ec4899"];
                   const color = colors[i % colors.length];
                   return (
                     <div
                       key={doc.id}
                       onClick={() => handleDocChange(doc.id)}
-                      className={`group flex items-center gap-4 glass-card rounded-xl px-4 py-3 cursor-pointer animate-fade-up`}
-                      style={{borderColor: selectedDocId === doc.id ? `${color}55` : undefined}}
+                      className={`group flex items-center gap-4 glass-card rounded-xl px-4 py-3 cursor-pointer animate-fade-up transition-all duration-200`}
+                      style={{
+                        borderColor: selectedDocId === doc.id ? `${color}55` : undefined,
+                        background: selectedDocId === doc.id ? `${color}12` : undefined,
+                        boxShadow: selectedDocId === doc.id ? `inset 3px 0 0 ${color}` : undefined,
+                      }}
                     >
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{background:`${color}18`}}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -367,10 +486,15 @@ export default function DashboardPage() {
                         </svg>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-white/85 truncate group-hover:text-white transition-colors">{doc.filename}</p>
+                        <p className={`text-sm font-semibold truncate transition-colors ${selectedDocId === doc.id ? "text-white" : "text-white/85 group-hover:text-white"}`}>{doc.filename}</p>
                         <p className="text-xs text-white/30">{new Date(doc.created_at).toLocaleDateString()}</p>
                       </div>
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {selectedDocId === doc.id && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{background:`${color}22`, color}}>
+                          Active
+                        </span>
+                      )}
+                      <div className={`flex items-center gap-1.5 transition-opacity ${selectedDocId === doc.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDocId(doc.id); }}
                           title="Chat with this document"
@@ -454,12 +578,16 @@ export default function DashboardPage() {
                           </div>
                         )}
                         <div
-                          className={`rounded-2xl px-4 py-3 text-sm max-w-[80%] leading-relaxed ${msg.role === "user" ? "rounded-tr-sm text-white/90" : "rounded-tl-sm text-white/80"}`}
+                          className={`rounded-2xl px-4 py-3 max-w-[82%] ${msg.role === "user" ? "rounded-tr-sm text-white/90 text-sm leading-relaxed" : "rounded-tl-sm text-white/80 min-w-0"}`}
                           style={msg.role === "user"
                             ? {background:"rgba(99,102,241,0.28)"}
                             : {background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}
                         >
-                          {msg.content}
+                          {msg.role === "assistant" ? (
+                            <MarkdownMessage content={msg.content} role="assistant" />
+                          ) : (
+                            msg.content
+                          )}
                         </div>
                       </div>
                     ))}
@@ -594,8 +722,8 @@ export default function DashboardPage() {
                               <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center mt-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
                               </div>
-                              <div className="rounded-2xl rounded-tl-sm px-3 py-2 text-xs text-white/70 flex-1 leading-relaxed" style={{background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.05)"}}>
-                                {record.answer}
+                              <div className="rounded-2xl rounded-tl-sm px-3 py-2 flex-1 min-w-0" style={{background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.05)"}}>
+                                <MarkdownMessage content={record.answer} role="assistant" compact />
                               </div>
                             </div>
                           </div>
