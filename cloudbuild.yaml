@@ -26,6 +26,10 @@ substitutions:
   _SQL_INSTANCE: ai-pdf-bot-db
   _DATA_BUCKET: ai-pdf-bot-data
   _SA_EMAIL: ai-pdf-bot-sa@PROJECT_ID.iam.gserviceaccount.com
+  # _IMAGE_TAG is used as the Docker image tag.
+  # When triggered from GitHub, SHORT_SHA is set automatically.
+  # When using gcloud builds submit manually, SHORT_SHA=v1 is passed as a substitution.
+  SHORT_SHA: latest
 
 steps:
   # ── 1. Build backend Docker image ─────────────────────────────────────────
