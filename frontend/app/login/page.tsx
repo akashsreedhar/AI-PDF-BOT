@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { loginUser } from "../../services/auth";
+import { loginUser, forgotPassword } from "../../services/auth";
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -16,6 +16,13 @@ export default function LoginPage() {
   const [success, setSuccess] = useState(false);
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Forgot password modal state
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotSent, setForgotSent] = useState(false);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -34,6 +41,27 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setForgotError(null);
+    setForgotLoading(true);
+    try {
+      await forgotPassword({ email: forgotEmail });
+      setForgotSent(true);
+    } catch (err: unknown) {
+      setForgotError(err instanceof Error ? err.message : "Failed to send reset email.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const closeForgot = () => {
+    setShowForgot(false);
+    setForgotEmail("");
+    setForgotError(null);
+    setForgotSent(false);
   };
 
   // Parallax tilt on card
@@ -172,7 +200,9 @@ export default function LoginPage() {
                     <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest">
                       Password
                     </label>
-                    <button type="button" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+                    <button type="button"
+                      onClick={() => { setShowForgot(true); setForgotEmail(email); }}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
                       Forgot password?
                     </button>
                   </div>
@@ -282,6 +312,80 @@ export default function LoginPage() {
           Protected by 256-bit AES encryption &nbsp;·&nbsp; SOC 2 Type II compliant
         </p>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{background:"rgba(0,0,0,0.7)",backdropFilter:"blur(6px)"}}>
+          <div className="animate-scale-in w-full max-w-sm">
+            <div className="gradient-border rounded-2xl p-px">
+              <div className="glass-dark rounded-2xl px-8 py-8 relative">
+                {/* Top glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-px" style={{background:"linear-gradient(90deg,transparent,rgba(99,102,241,0.6),transparent)"}}/>
+
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-bold text-white">Reset your password</h2>
+                  <button onClick={closeForgot} className="text-white/30 hover:text-white/70 transition-colors">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+
+                {forgotSent ? (
+                  <div className="text-center py-4 animate-scale-in">
+                    <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="white" strokeWidth="1.8"/>
+                        <polyline points="22,6 12,13 2,6" stroke="white" strokeWidth="1.8"/>
+                      </svg>
+                    </div>
+                    <p className="text-white font-semibold mb-1">Check your inbox</p>
+                    <p className="text-white/40 text-sm">If that email exists, a reset link has been sent. The link expires in 15 minutes.</p>
+                    <button onClick={closeForgot} className="btn-primary mt-6 w-full py-3 rounded-xl text-white font-bold text-sm">
+                      Back to sign in
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-white/40 mb-5">Enter your email and we&apos;ll send you a password reset link.</p>
+
+                    {forgotError && (
+                      <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-xl text-sm" style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)"}}>
+                        <span className="text-red-400">{forgotError}</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Email address</label>
+                        <input
+                          type="email"
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          className="input-glass w-full px-4 py-3 rounded-xl text-sm font-medium"
+                          required
+                          autoFocus
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={forgotLoading}
+                        className="btn-primary w-full py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2"
+                      >
+                        {forgotLoading ? (
+                          <><div className="spinner" style={{width:"16px",height:"16px"}}></div>Sending...</>
+                        ) : "Send reset link"}
+                      </button>
+                    </form>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

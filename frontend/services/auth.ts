@@ -28,3 +28,29 @@ export async function loginUser({ email, password }: { email: string; password: 
   }
   return res.json();
 }
+
+export async function forgotPassword({ email }: { email: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/forgot_password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Failed to send reset email');
+  }
+  return res.json();
+}
+
+export async function resetPassword({ token, new_password }: { token: string; new_password: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/reset_password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, new_password }),
+  });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Failed to reset password');
+  }
+  return res.json();
+}
