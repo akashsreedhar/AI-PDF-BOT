@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getDocuments, uploadDocuments, deleteDocument, Document } from "@/services/documents";
-import { sendChatMessage, getChatHistory, generateQuiz, Message, ConversationRecord, QuizQuestion } from "@/services/chat";
+import { sendChatMessage, getChatHistory, generateQuiz, streamChatMessage, Message, ConversationRecord, QuizQuestion } from "@/services/chat";
 import MarkdownMessage from "@/components/MarkdownMessage";
 
 const LANGUAGES = ["English","Hindi","Telugu","Tamil","Spanish","French","German","Arabic","Chinese","Japanese"];
@@ -222,11 +222,17 @@ export default function DashboardPage() {
     setLiveSources([]);
     setFollowUps([]);
     const history = chatMessages.filter((m) => m.role !== "assistant" || chatMessages.indexOf(m) > 0);
-    setChatMessages((prev) => [...prev, { role: "user", content: question }]);
+
+    // Add user message + empty assistant placeholder atomically
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "user", content: question },
+      { role: "assistant", content: "" },
+    ]);
     setChatLoading(true);
 
     try {
-      const res = await sendChatMessage({
+      await streamChatMessage({
         documentId: selectedDocId,
         question,
         conversationHistory: history.slice(-10),
@@ -234,12 +240,26 @@ export default function DashboardPage() {
         liveMode,
         language,
         compareDocumentId: compareDocId ?? undefined,
+        onToken: (tok) => {
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, content: last.content + tok };
+            return updated;
+          });
+        },
+        onDone: (data) => {
+          if (data.live_sources?.length) setLiveSources(data.live_sources);
+          setFollowUps(data.follow_up_questions || []);
+        },
+        onError: (err) => {
+          setChatError(err);
+          setChatMessages((prev) => prev.slice(0, -1)); // remove empty placeholder
+        },
       });
-      setChatMessages((prev) => [...prev, { role: "assistant", content: res.answer }]);
-      if (res.live_sources?.length) setLiveSources(res.live_sources);
-      setFollowUps(res.follow_up_questions || []);
     } catch (e: unknown) {
       setChatError(e instanceof Error ? e.message : "Something went wrong");
+      setChatMessages((prev) => prev.slice(0, -1));
     } finally {
       setChatLoading(false);
     }
@@ -695,27 +715,21 @@ export default function DashboardPage() {
                             : {background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}
                         >
                           {msg.role === "assistant" ? (
-                            <MarkdownMessage content={msg.content} role="assistant" />
+                            chatLoading && i === chatMessages.length - 1 && msg.content === "" ? (
+                              <span className="inline-flex gap-1 items-center">
+                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"0ms"}}/>
+                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"150ms"}}/>
+                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"300ms"}}/>
+                              </span>
+                            ) : (
+                              <MarkdownMessage content={msg.content} role="assistant" />
+                            )
                           ) : (
                             msg.content
                           )}
                         </div>
                       </div>
                     ))}
-                    {chatLoading && (
-                      <div className="flex gap-3 items-start">
-                        <div className="w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center mt-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
-                        </div>
-                        <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}>
-                          <span className="inline-flex gap-1 items-center">
-                            <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"0ms"}}/>
-                            <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"150ms"}}/>
-                            <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"300ms"}}/>
-                          </span>
-                        </div>
-                      </div>
-                    )}
                     {chatError && <p className="text-xs text-red-400 px-1">{chatError}</p>}
                     <div ref={chatEndRef}/>
                   </div>
