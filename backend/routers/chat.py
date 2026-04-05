@@ -11,6 +11,7 @@ from database import get_db
 from models import Conversation, Document
 from utils.authentication import get_current_user
 from utils.llm_client import get_llm_response, stream_llm_response
+from utils.llm_client import get_llm_response
 from utils.rag_builder import load_faiss_index
 from utils.web_search import format_web_results, web_search
 

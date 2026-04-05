@@ -1,4 +1,5 @@
 from typing import Generator, Literal, List, Dict
+from typing import Literal, List, Dict
 
 from config import (
     GROQ_API_KEY,
@@ -60,6 +61,7 @@ def get_llm_response(
         raise ValueError(
             f"Unsupported LLM provider: '{provider}'. Choose 'groq' or 'openai'."
         )
+<<<<<<< HEAD
 
 
 def stream_llm_response(
@@ -109,3 +111,5 @@ def stream_llm_response(
         raise ValueError(
             f"Unsupported LLM provider: '{provider}'. Choose 'groq' or 'openai'."
         )
+=======
+>>>>>>> origin/master
