@@ -91,7 +91,7 @@ steps:
       - --add-cloudsql-instances=$PROJECT_ID:$_REGION:$_SQL_INSTANCE
       - --add-volume=name=data,type=cloud-storage,bucket=$_DATA_BUCKET
       - --add-volume-mount=volume=data,mount-path=/app/data
-      - --set-env-vars=ENVIRONMENT=gcp,PORT=8080,CLOUD_SQL_CONNECTION_NAME=$PROJECT_ID:$_REGION:$_SQL_INSTANCE,DB_NAME=ai_pdf_bot,RESEND_FROM_EMAIL=aidocchat@hireplz.live,FRONTEND_URL=$_FRONTEND_URL,ALLOWED_ORIGINS=$_FRONTEND_URL
+      - --set-env-vars=ENVIRONMENT=gcp,CLOUD_SQL_CONNECTION_NAME=$PROJECT_ID:$_REGION:$_SQL_INSTANCE,DB_NAME=ai_pdf_bot,RESEND_FROM_EMAIL=aidocchat@hireplz.live,FRONTEND_URL=$_FRONTEND_URL,ALLOWED_ORIGINS=$_FRONTEND_URL
       - --set-secrets=DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD:latest,SECRET_KEY=JWT_SECRET_KEY:latest,GROQ_API_KEY=GROQ_API_KEY:latest,RESEND_API_KEY=RESEND_API_KEY:latest
       - --allow-unauthenticated
       - --memory=2Gi
@@ -114,6 +114,7 @@ steps:
       - --platform=managed
       - --service-account=$_SA_EMAIL
       - --set-env-vars=NODE_ENV=production
+      - --port=3000
       - --allow-unauthenticated
       - --memory=512Mi
       - --cpu=1
