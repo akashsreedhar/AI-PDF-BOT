@@ -56,7 +56,7 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",
 
 # LLM Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY",   "")
 
 # Resend Email Configuration
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
