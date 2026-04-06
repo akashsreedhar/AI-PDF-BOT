@@ -57,6 +57,87 @@ export async function sendChatMessage({
   return res.json();
 }
 
+export async function streamChatMessage({
+  documentId,
+  question,
+  conversationHistory,
+  token,
+  provider = 'groq',
+  liveMode = false,
+  language = 'English',
+  compareDocumentId,
+  onToken,
+  onDone,
+  onError,
+}: {
+  documentId: number;
+  question: string;
+  conversationHistory: Message[];
+  token: string;
+  provider?: 'groq' | 'openai';
+  liveMode?: boolean;
+  language?: string;
+  compareDocumentId?: number;
+  onToken: (token: string) => void;
+  onDone: (data: {
+    conversation_id: number;
+    conversation_history: Message[];
+    live_sources: string[];
+    follow_up_questions: string[];
+  }) => void;
+  onError: (error: string) => void;
+}): Promise<void> {
+  const body: Record<string, unknown> = {
+    document_id: documentId,
+    question,
+    provider,
+    conversation_history: conversationHistory,
+    live_mode: liveMode,
+    language,
+  };
+  if (compareDocumentId) body.compare_document_id = compareDocumentId;
+
+  const res = await fetch(`${API_BASE}/api/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    onError(err.detail || 'Chat request failed');
+    return;
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6));
+        if (event.type === 'token') {
+          onToken(event.content);
+        } else if (event.type === 'done') {
+          onDone(event);
+        } else if (event.type === 'error') {
+          onError(event.detail);
+        }
+      } catch { /* ignore malformed events */ }
+    }
+  }
+}
+
 export interface ConversationRecord {
   id: number;
   question: string;
