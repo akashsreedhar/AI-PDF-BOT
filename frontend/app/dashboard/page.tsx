@@ -1218,33 +1218,30 @@ export default function DashboardPage() {
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" style={{minHeight:0}}>
                   {chatMessages.map((msg, i) => (
                     <div key={i} className={`flex gap-2 items-end ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                      {msg.role === "assistant" && (
-                        <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
+                      {msg.role === "assistant" && chatLoading && i === chatMessages.length - 1 ? (
+                        <AgentThinking phase={msg.content === "" ? "thinking" : "producing"} />
+                      ) : msg.role === "assistant" ? (
+                        <>
+                          <div className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
+                          </div>
+                          <div
+                            className="rounded-2xl px-3 py-2.5 text-sm leading-relaxed rounded-bl-sm min-w-0 flex-1 text-white/80"
+                            style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}
+                          >
+                            <MarkdownMessage content={msg.content} role="assistant" />
+                          </div>
+                        </>
+                      ) : (
+                        <div
+                          className="rounded-2xl px-3 py-2.5 text-sm leading-relaxed rounded-br-sm max-w-[80%] text-white/90"
+                          style={{background:"rgba(99,102,241,0.3)"}}
+                        >
+                          {msg.content}
                         </div>
                       )}
-                      <div
-                        className={`rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "rounded-br-sm max-w-[80%] text-white/90" : "rounded-bl-sm min-w-0 flex-1 text-white/80"}`}
-                        style={msg.role === "user" ? {background:"rgba(99,102,241,0.3)"} : {background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}
-                      >
-                        {msg.role === "assistant" ? <MarkdownMessage content={msg.content} role="assistant" /> : msg.content}
-                      </div>
                     </div>
                   ))}
-                  {chatLoading && (
-                    <div className="flex gap-2 items-end">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
-                      </div>
-                      <div className="rounded-2xl rounded-bl-sm px-3 py-2.5" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}>
-                        <span className="flex gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{animationDelay:"0ms"}}/>
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{animationDelay:"150ms"}}/>
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{animationDelay:"300ms"}}/>
-                        </span>
-                      </div>
-                    </div>
-                  )}
                   {chatError && <p className="text-xs text-red-400">{chatError}</p>}
                   <div ref={chatEndRefMobile}/>
                 </div>
