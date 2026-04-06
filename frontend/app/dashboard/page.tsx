@@ -6,7 +6,7 @@ import { sendChatMessage, getChatHistory, generateQuiz, streamChatMessage, Messa
 import MarkdownMessage from "@/components/MarkdownMessage";
 import AgentThinking from "@/components/AgentThinking";
 
-const LANGUAGES = ["English","Hindi","Telugu","Tamil","Spanish","French","German","Arabic","Chinese","Japanese"];
+const LANGUAGES = ["English","Hindi","Telugu","Tamil","Malayalam","Spanish","French","German","Arabic","Chinese","Japanese"];
 
 const quickActions = [
   {

@@ -16,8 +16,7 @@ env/
 *.env
 
 # ── FastAPI / backend data ───────────────────────────────
-backend/data/uploads/
-backend/data/faiss_indexes/
+backend/data/
 backend/*.db
 backend/*.sqlite
 backend/*.sqlite3
