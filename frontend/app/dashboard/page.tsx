@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { getDocuments, uploadDocuments, deleteDocument, Document } from "@/services/documents";
 import { sendChatMessage, getChatHistory, generateQuiz, streamChatMessage, Message, ConversationRecord, QuizQuestion } from "@/services/chat";
 import MarkdownMessage from "@/components/MarkdownMessage";
+import AgentThinking from "@/components/AgentThinking";
 
 const LANGUAGES = ["English","Hindi","Telugu","Tamil","Spanish","French","German","Arabic","Chinese","Japanese"];
 
@@ -77,6 +78,7 @@ export default function DashboardPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const chatEndRefMobile = useRef<HTMLDivElement>(null);
   const [mobileTab, setMobileTab] = useState<"home" | "docs" | "chat">("home");
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchDocuments = async (token: string) => {
     setDocsLoading(true);
@@ -94,12 +96,38 @@ export default function DashboardPage() {
   useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) { router.replace("/login"); return; }
+
+    // Decode JWT payload to get the expiry time (no extra library needed)
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (payload.exp) {
+        const msUntilExpiry = payload.exp * 1000 - Date.now();
+        if (msUntilExpiry <= 0) {
+          // Token already expired — clear storage and redirect immediately
+          localStorage.removeItem("jwt");
+          localStorage.removeItem("user");
+          router.replace("/login");
+          return;
+        }
+        // Schedule automatic logout exactly when the token expires
+        expiryTimerRef.current = setTimeout(() => {
+          localStorage.removeItem("jwt");
+          localStorage.removeItem("user");
+          router.replace("/login");
+        }, msUntilExpiry);
+      }
+    } catch { /* malformed token — let the server reject it */ }
+
     const stored = localStorage.getItem("user");
     if (stored) {
       try { setUserName(JSON.parse(stored).name || "there"); } catch { /* ignore */ }
     }
     setMounted(true);
     fetchDocuments(token);
+
+    return () => {
+      if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
+    };
   }, [router]);
 
   // Auto-scroll chat
@@ -695,31 +723,23 @@ export default function DashboardPage() {
                   <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4" style={{minHeight:0}}>
                     {chatMessages.map((msg, i) => (
                       <div key={i} className={`flex gap-3 items-start ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                        {msg.role === "assistant" && (
-                          <div className="w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center mt-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
+                        {/* Agent thinking / producing animation replaces the whole row for loading state */}
+                        {msg.role === "assistant" && chatLoading && i === chatMessages.length - 1 ? (
+                          <AgentThinking phase={msg.content === "" ? "thinking" : "producing"} />
+                        ) : msg.role === "assistant" ? (
+                          <>
+                            <div className="w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center mt-0.5" style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)"}}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="white"/></svg>
+                            </div>
+                            <div className="rounded-2xl rounded-tl-sm px-4 py-3 max-w-[82%] text-white/80 min-w-0" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}>
+                              <MarkdownMessage content={msg.content} role="assistant" />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="rounded-2xl rounded-tr-sm px-4 py-3 max-w-[82%] text-white/90 text-sm leading-relaxed" style={{background:"rgba(99,102,241,0.28)"}}>
+                            {msg.content}
                           </div>
                         )}
-                        <div
-                          className={`rounded-2xl px-4 py-3 max-w-[82%] ${msg.role === "user" ? "rounded-tr-sm text-white/90 text-sm leading-relaxed" : "rounded-tl-sm text-white/80 min-w-0"}`}
-                          style={msg.role === "user"
-                            ? {background:"rgba(99,102,241,0.28)"}
-                            : {background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)"}}
-                        >
-                          {msg.role === "assistant" ? (
-                            chatLoading && i === chatMessages.length - 1 && msg.content === "" ? (
-                              <span className="inline-flex gap-1 items-center">
-                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"0ms"}}/>
-                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"150ms"}}/>
-                                <span className="w-2 h-2 rounded-full bg-white/30 animate-bounce" style={{animationDelay:"300ms"}}/>
-                              </span>
-                            ) : (
-                              <MarkdownMessage content={msg.content} role="assistant" />
-                            )
-                          ) : (
-                            msg.content
-                          )}
-                        </div>
                       </div>
                     ))}
                     {chatError && <p className="text-xs text-red-400 px-1">{chatError}</p>}

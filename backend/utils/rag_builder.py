@@ -1,4 +1,6 @@
+import io
 import os
+import tempfile
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -18,21 +20,28 @@ def get_index_path(user_id: int, document_id: int) -> str:
     return os.path.join(FAISS_INDEX_DIR, str(user_id), str(document_id))
 
 
-def build_faiss_index(file_path: str, user_id: int, document_id: int) -> str:
+def build_faiss_index(file_bytes: bytes, ext: str, user_id: int, document_id: int) -> str:
     """
-    Load a document, split into overlapping chunks, embed with a local
+    Accept raw file bytes, split into overlapping chunks, embed with a local
     HuggingFace model, build a FAISS vector store, and persist it to disk.
+    The bytes are processed via a temporary file that is deleted immediately after.
 
     Supports: PDF (.pdf), plain-text (.txt)
     Returns: absolute path to the saved FAISS index directory.
     """
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        loader = PyPDFLoader(file_path)
-    else:
-        loader = TextLoader(file_path, encoding="utf-8")
+    ext = ext.lower()
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
 
-    documents = loader.load()
+    try:
+        if ext == ".pdf":
+            loader = PyPDFLoader(tmp_path)
+        else:
+            loader = TextLoader(tmp_path, encoding="utf-8")
+        documents = loader.load()
+    finally:
+        os.remove(tmp_path)
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,

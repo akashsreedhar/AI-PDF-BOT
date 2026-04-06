@@ -1,5 +1,7 @@
 import time
 import asyncio
+import os
+import shutil
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -8,6 +10,24 @@ from routers.document_process import router as document_router
 from routers.chat import router as chat_router
 from database import init_db
 from config import ALLOWED_ORIGINS
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
+
+
+def _cleanup_uploads() -> None:
+    """Delete all files in the uploads directory (files are no longer persisted)."""
+    if not os.path.isdir(UPLOAD_DIR):
+        return
+    for name in os.listdir(UPLOAD_DIR):
+        path = os.path.join(UPLOAD_DIR, name)
+        try:
+            if os.path.isfile(path) or os.path.islink(path):
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+        except Exception as exc:
+            print(f"Warning: could not remove {path}: {exc}")
+    print(f"✓ Uploads directory cleaned ({UPLOAD_DIR})")
 
 
 def _init_db_with_retry(max_attempts: int = 5, delay: int = 5) -> None:
@@ -38,6 +58,8 @@ def _init_db_with_retry(max_attempts: int = 5, delay: int = 5) -> None:
 async def lifespan(app: FastAPI):
     # Run blocking DB init in a thread so the event loop stays responsive
     await asyncio.get_event_loop().run_in_executor(None, _init_db_with_retry)
+    # Remove any previously uploaded files — only FAISS indexes are kept
+    await asyncio.get_event_loop().run_in_executor(None, _cleanup_uploads)
     print("✓ Application started successfully")
     yield
     # Shutdown: Cleanup if needed

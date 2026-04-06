@@ -13,7 +13,6 @@ from utils.rag_builder import build_faiss_index, load_faiss_index
 from utils.authentication import get_current_user
 from utils.llm_client import get_llm_response
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 ALLOWED_EXTENSIONS = {".pdf", ".txt"}
 
 router = APIRouter()
@@ -52,7 +51,6 @@ def upload_documents(
     Accept one or more PDF/TXT files, persist each file to disk,
     build a per-document FAISS vector index, and record metadata in the DB.
     """
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
     user_id = current_user["id"]  # already int from get_current_user
     results = []
 
@@ -64,26 +62,20 @@ def upload_documents(
                 detail=f"Unsupported file type '{ext}'. Allowed types: PDF, TXT.",
             )
 
-        # Create DB record first so we can use its ID for a collision-free filename
+        # Read entire file into memory — we do NOT persist it to disk
+        file_bytes = upload.file.read()
+
+        # Create DB record first so we can use its ID for the index path
         doc = Document(user_id=user_id, filename=upload.filename)
         db.add(doc)
         db.flush()  # assigns doc.id without committing yet
 
-        # Store file as  <user_id>_<doc_id><ext>  to avoid path-traversal risks
-        safe_filename = f"{user_id}_{doc.id}{ext}"
-        file_path = os.path.join(UPLOAD_DIR, safe_filename)
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(upload.file, buffer)
-
-        # Build FAISS index from the saved file
+        # Build FAISS index directly from in-memory bytes
         try:
-            index_path = build_faiss_index(file_path, user_id, doc.id)
+            index_path = build_faiss_index(file_bytes, ext, user_id, doc.id)
             doc.faiss_index_path = index_path
         except Exception as exc:
             db.rollback()
-            if os.path.exists(file_path):
-                os.remove(file_path)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to build FAISS index for '{upload.filename}': {exc}",
@@ -182,12 +174,6 @@ def delete_document(
     )
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-
-    # Remove uploaded file (try both extensions)
-    for ext in ALLOWED_EXTENSIONS:
-        file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{doc_id}{ext}")
-        if os.path.exists(file_path):
-            os.remove(file_path)
 
     # Remove FAISS index directory
     if doc.faiss_index_path and os.path.exists(doc.faiss_index_path):
