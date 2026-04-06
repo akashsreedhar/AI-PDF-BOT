@@ -17,15 +17,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 substitutions:
-  _REGION: us-central1
+  _REGION: asia-south1
   _REPOSITORY: ai-pdf-bot
   _BACKEND_SERVICE: ai-pdf-bot-backend
   _FRONTEND_SERVICE: ai-pdf-bot-frontend
-  _BACKEND_URL: https://ai-pdf-bot-backend-PLACEHOLDER.run.app
-  _FRONTEND_URL: https://ai-pdf-bot-frontend-PLACEHOLDER.run.app
+  _BACKEND_URL: https://ai-pdf-bot-backend-812146165169.asia-south1.run.app
+  _FRONTEND_URL: https://ai-pdf-bot-frontend-812146165169.asia-south1.run.app
   _SQL_INSTANCE: ai-pdf-bot-db
-  _DATA_BUCKET: ai-pdf-bot-data
-  _SA_EMAIL: ai-pdf-bot-sa@PROJECT_ID.iam.gserviceaccount.com
+  _SQL_REGION: us-central1
+  _DATA_BUCKET: project-527f9103-169a-4344-ba7-ai-pdf-bot-data
+  _SA_EMAIL: ai-pdf-bot-sa@project-527f9103-169a-4344-ba7.iam.gserviceaccount.com
   # Image tag: auto-set to git short SHA by GitHub trigger.
   # When running manually via gcloud builds submit, defaults to "latest".
   _IMAGE_TAG: latest
@@ -88,10 +89,10 @@ steps:
       - --platform=managed
       - --execution-environment=gen2
       - --service-account=$_SA_EMAIL
-      - --add-cloudsql-instances=$PROJECT_ID:$_REGION:$_SQL_INSTANCE
+      - --add-cloudsql-instances=$PROJECT_ID:$_SQL_REGION:$_SQL_INSTANCE
       - --add-volume=name=data,type=cloud-storage,bucket=$_DATA_BUCKET
       - --add-volume-mount=volume=data,mount-path=/app/data
-      - --set-env-vars=ENVIRONMENT=gcp,CLOUD_SQL_CONNECTION_NAME=$PROJECT_ID:$_REGION:$_SQL_INSTANCE,DB_NAME=ai_pdf_bot,RESEND_FROM_EMAIL=aidocchat@hireplz.live,FRONTEND_URL=$_FRONTEND_URL,ALLOWED_ORIGINS=$_FRONTEND_URL
+      - --set-env-vars=ENVIRONMENT=gcp,CLOUD_SQL_CONNECTION_NAME=$PROJECT_ID:$_SQL_REGION:$_SQL_INSTANCE,DB_NAME=ai_pdf_bot,RESEND_FROM_EMAIL=aidocchat@hireplz.live,FRONTEND_URL=$_FRONTEND_URL,ALLOWED_ORIGINS=$_FRONTEND_URL
       - --set-secrets=DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD:latest,SECRET_KEY=JWT_SECRET_KEY:latest,GROQ_API_KEY=GROQ_API_KEY:latest,RESEND_API_KEY=RESEND_API_KEY:latest
       - --allow-unauthenticated
       - --memory=2Gi
