@@ -101,7 +101,6 @@ steps:
       - --min-instances=1
       - --max-instances=10
       - --timeout=300
-      - --startup-probe-failure-threshold=3
 
   # ── 6. Deploy frontend to Cloud Run ───────────────────────────────────────
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
