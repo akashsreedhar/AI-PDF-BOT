@@ -47,9 +47,17 @@ SQLALCHEMY_ECHO = os.getenv("SQLALCHEMY_ECHO", "False").lower() == "true"
 SQLALCHEMY_POOL_RECYCLE = int(os.getenv("SQLALCHEMY_POOL_RECYCLE", "3600"))
 
 # JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY")
+_secret_key_default = "dev-only-insecure-secret-key-change-in-production"
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY environment variable must be set")
+    if ENVIRONMENT == Environment.GCP.value:
+        raise RuntimeError("SECRET_KEY environment variable must be set in production")
+    import warnings
+    warnings.warn(
+        "SECRET_KEY is not set – using an insecure default. Set SECRET_KEY in your .env for local dev.",
+        stacklevel=2,
+    )
+    SECRET_KEY = _secret_key_default
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
