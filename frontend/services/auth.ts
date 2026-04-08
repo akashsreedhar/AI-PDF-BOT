@@ -3,6 +3,16 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
+async function parseError(res: Response, fallback: string): Promise<Error> {
+  try {
+    const data = await res.json();
+    const message = data.detail || data.message || fallback;
+    return new Error(message);
+  } catch {
+    return new Error(fallback);
+  }
+}
+
 export async function signupUser({ name, email, password }: { name: string; email: string; password: string }) {
   const res = await fetch(`${API_BASE_URL}/api/signup`, {
     method: 'POST',
@@ -10,8 +20,7 @@ export async function signupUser({ name, email, password }: { name: string; emai
     body: JSON.stringify({ name, email, password }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.message || 'Signup failed');
+    throw await parseError(res, 'Signup failed');
   }
   return res.json();
 }
@@ -23,8 +32,7 @@ export async function loginUser({ email, password }: { email: string; password: 
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.message || 'Login failed');
+    throw await parseError(res, 'Login failed');
   }
   return res.json();
 }
@@ -36,8 +44,7 @@ export async function forgotPassword({ email }: { email: string }) {
     body: JSON.stringify({ email }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.detail || 'Failed to send reset email');
+    throw await parseError(res, 'Failed to send reset email');
   }
   return res.json();
 }
@@ -49,8 +56,7 @@ export async function resetPassword({ token, new_password }: { token: string; ne
     body: JSON.stringify({ token, new_password }),
   });
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.detail || 'Failed to reset password');
+    throw await parseError(res, 'Failed to reset password');
   }
   return res.json();
 }

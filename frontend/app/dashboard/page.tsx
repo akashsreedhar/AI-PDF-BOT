@@ -2,7 +2,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getDocuments, uploadDocuments, deleteDocument, Document } from "@/services/documents";
-import { sendChatMessage, getChatHistory, generateQuiz, streamChatMessage, Message, ConversationRecord, QuizQuestion } from "@/services/chat";
+import {
+  addChatMemory,
+  ChatPreferences,
+  getChatHistory,
+  getChatMemory,
+  getChatPreferences,
+  generateQuiz,
+  Message,
+  ConversationRecord,
+  QuizQuestion,
+  sendChatMessage,
+  streamChatMessage,
+  updateChatPreferences,
+  UserMemoryItem,
+} from "@/services/chat";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import AgentThinking from "@/components/AgentThinking";
 
@@ -53,12 +67,29 @@ export default function DashboardPage() {
   const [chatError, setChatError] = useState("");
   const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
+  const [followUpsOpen, setFollowUpsOpen] = useState(false);
 
   // Chat modes
   const [liveMode, setLiveMode] = useState(false);
   const [liveSources, setLiveSources] = useState<string[]>([]);
+  const [liveSourcesOpen, setLiveSourcesOpen] = useState(false);
   const [language, setLanguage] = useState("English");
   const [compareDocId, setCompareDocId] = useState<number | null>(null);
+  const [knowledgeDocIds, setKnowledgeDocIds] = useState<number[]>([]);
+  const [contradictionCheck, setContradictionCheck] = useState(true);
+  const [contradictionReport, setContradictionReport] = useState<string[]>([]);
+  const [useMemory, setUseMemory] = useState(true);
+  const [prefSaving, setPrefSaving] = useState(false);
+  const [preferences, setPreferences] = useState<ChatPreferences>({
+    response_tone: "balanced",
+    response_length: "medium",
+    language: "English",
+    citation_style: "inline",
+  });
+  const [memoryKey, setMemoryKey] = useState("");
+  const [memoryValue, setMemoryValue] = useState("");
+  const [memoryImportance, setMemoryImportance] = useState(3);
+  const [memoryItems, setMemoryItems] = useState<UserMemoryItem[]>([]);
 
   // History
   const [chatTab, setChatTab] = useState<"chat" | "history" | "quiz">("chat");
@@ -93,6 +124,68 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchUserSettings = async (token: string) => {
+    try {
+      const [pref, mem] = await Promise.all([
+        getChatPreferences(token),
+        getChatMemory(token),
+      ]);
+      setPreferences(pref);
+      setLanguage(pref.language || "English");
+      setMemoryItems(mem);
+    } catch {
+      // non-blocking
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    const token = localStorage.getItem("jwt");
+    if (!token || prefSaving) return;
+    setPrefSaving(true);
+    try {
+      const updated = await updateChatPreferences(
+        {
+          ...preferences,
+          language,
+        },
+        token,
+      );
+      setPreferences(updated);
+      setLanguage(updated.language || language);
+      showToast("Preferences saved", "success");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "Failed to save preferences", "error");
+    } finally {
+      setPrefSaving(false);
+    }
+  };
+
+  const handleAddMemory = async () => {
+    const token = localStorage.getItem("jwt");
+    if (!token) return;
+    if (!memoryKey.trim() || !memoryValue.trim()) {
+      showToast("Add both memory key and value", "error");
+      return;
+    }
+    try {
+      const created = await addChatMemory(
+        {
+          memory_key: memoryKey.trim(),
+          memory_value: memoryValue.trim(),
+          importance: memoryImportance,
+        },
+        token,
+      );
+      setMemoryItems((prev) => [created, ...prev].slice(0, 10));
+      setMemoryKey("");
+      setMemoryValue("");
+      setMemoryImportance(3);
+      showToast("Memory saved", "success");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "Failed to save memory", "error");
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) { router.replace("/login"); return; }
@@ -124,6 +217,7 @@ export default function DashboardPage() {
     }
     setMounted(true);
     fetchDocuments(token);
+    fetchUserSettings(token);
 
     return () => {
       if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
@@ -135,6 +229,14 @@ export default function DashboardPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     chatEndRefMobile.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  useEffect(() => {
+    if (followUps.length === 0) setFollowUpsOpen(false);
+  }, [followUps]);
+
+  useEffect(() => {
+    if (liveSources.length === 0) setLiveSourcesOpen(false);
+  }, [liveSources]);
 
   const fetchHistory = async (docId: number) => {
     const token = localStorage.getItem("jwt");
@@ -212,6 +314,7 @@ export default function DashboardPage() {
     setChatError("");
     setFollowUps([]);
     setLiveSources([]);
+    setContradictionReport([]);
     setChatTab("chat");
   };
 
@@ -223,18 +326,24 @@ export default function DashboardPage() {
     setChatInput("");
     setChatError("");
     setFollowUps([]);
+    setContradictionReport([]);
     setChatMessages((prev) => [...prev, { role: "user", content: "\uD83D\uDCCB Summarize this document" }]);
     setChatLoading(true);
     try {
+      const extraDocIds = Array.from(new Set(knowledgeDocIds.filter((id) => id !== selectedDocId)));
       const res = await sendChatMessage({
         documentId: selectedDocId,
         question: "Provide a comprehensive summary: (1) main topic & purpose, (2) key points & findings, (3) important data, (4) conclusions.",
         conversationHistory: [],
         token,
         language,
+        documentIds: extraDocIds,
+        useMemory,
+        contradictionCheck,
       });
       setChatMessages((prev) => [...prev, { role: "assistant", content: res.answer }]);
       setFollowUps(res.follow_up_questions || []);
+      setContradictionReport(res.contradiction_report || []);
     } catch (e: unknown) {
       setChatError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -252,7 +361,9 @@ export default function DashboardPage() {
     setChatError("");
     setLiveSources([]);
     setFollowUps([]);
+    setContradictionReport([]);
     const history = chatMessages.filter((m) => m.role !== "assistant" || chatMessages.indexOf(m) > 0);
+    const extraDocIds = Array.from(new Set(knowledgeDocIds.filter((id) => id !== selectedDocId)));
 
     // Add user message + empty assistant placeholder atomically
     setChatMessages((prev) => [
@@ -271,6 +382,9 @@ export default function DashboardPage() {
         liveMode,
         language,
         compareDocumentId: compareDocId ?? undefined,
+        documentIds: extraDocIds,
+        useMemory,
+        contradictionCheck,
         onToken: (tok) => {
           setChatMessages((prev) => {
             const updated = [...prev];
@@ -282,6 +396,7 @@ export default function DashboardPage() {
         onDone: (data) => {
           if (data.live_sources?.length) setLiveSources(data.live_sources);
           setFollowUps(data.follow_up_questions || []);
+          setContradictionReport(data.contradiction_report || []);
         },
         onError: (err) => {
           setChatError(err);
@@ -672,15 +787,82 @@ export default function DashboardPage() {
                 </div>
                 {/* Language + Compare row (chat tab only) */}
                 {chatTab === "chat" && (
-                  <div className="flex items-center gap-2">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
                     <select
                       value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
+                      onChange={(e) => {
+                        setLanguage(e.target.value);
+                        setPreferences((prev) => ({ ...prev, language: e.target.value }));
+                      }}
                       className="input-glass px-3 py-1.5 rounded-xl text-xs flex-1"
                       title="Response language"
                     >
                       {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
                     </select>
+                    <select
+                      value={preferences.response_tone}
+                      onChange={(e) => setPreferences((prev) => ({ ...prev, response_tone: e.target.value }))}
+                      className="input-glass px-3 py-1.5 rounded-xl text-xs flex-1"
+                      title="Response tone"
+                    >
+                      <option value="concise">Tone: Concise</option>
+                      <option value="balanced">Tone: Balanced</option>
+                      <option value="detailed">Tone: Detailed</option>
+                    </select>
+                    <select
+                      value={preferences.response_length}
+                      onChange={(e) => setPreferences((prev) => ({ ...prev, response_length: e.target.value }))}
+                      className="input-glass px-3 py-1.5 rounded-xl text-xs flex-1"
+                      title="Response length"
+                    >
+                      <option value="short">Length: Short</option>
+                      <option value="medium">Length: Medium</option>
+                      <option value="long">Length: Long</option>
+                    </select>
+                    <select
+                      value={preferences.citation_style}
+                      onChange={(e) => setPreferences((prev) => ({ ...prev, citation_style: e.target.value }))}
+                      className="input-glass px-3 py-1.5 rounded-xl text-xs"
+                      title="Citation style"
+                    >
+                      <option value="inline">Citations: Inline</option>
+                      <option value="footnotes">Citations: Footnotes</option>
+                    </select>
+                    <button
+                      onClick={handleSavePreferences}
+                      disabled={prefSaving}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-60"
+                      style={{background:"rgba(99,102,241,0.2)", border:"1px solid rgba(99,102,241,0.4)", color:"#a5b4fc"}}
+                    >
+                      {prefSaving ? "Saving..." : "Save"}
+                    </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)"}}>
+                        <input type="checkbox" checked={useMemory} onChange={(e) => setUseMemory(e.target.checked)} />
+                        <span className="text-white/70">Use Memory</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)"}}>
+                        <input type="checkbox" checked={contradictionCheck} onChange={(e) => setContradictionCheck(e.target.checked)} />
+                        <span className="text-white/70">Contradiction Check</span>
+                      </label>
+                      {documents.length > 1 && (
+                        <select
+                          multiple
+                          value={knowledgeDocIds.map(String)}
+                          onChange={(e) => {
+                            const vals = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
+                            setKnowledgeDocIds(vals);
+                          }}
+                          className="input-glass px-3 py-1.5 rounded-xl text-xs flex-1"
+                          title="Additional knowledge documents (Ctrl/Cmd-click for multi-select)"
+                        >
+                          {documents.filter(d => d.id !== selectedDocId).map((d) => (
+                            <option key={d.id} value={d.id}>{d.filename}</option>
+                          ))}
+                        </select>
+                      )}
                     {documents.length > 1 && (
                       <select
                         value={compareDocId ?? ""}
@@ -693,6 +875,44 @@ export default function DashboardPage() {
                           <option key={d.id} value={d.id}>{d.filename}</option>
                         ))}
                       </select>
+                    )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={memoryKey}
+                        onChange={(e) => setMemoryKey(e.target.value)}
+                        placeholder="Memory key (example: preferred topic)"
+                        className="input-glass px-3 py-1.5 rounded-xl text-xs flex-1"
+                      />
+                      <input
+                        value={memoryValue}
+                        onChange={(e) => setMemoryValue(e.target.value)}
+                        placeholder="Memory value"
+                        className="input-glass px-3 py-1.5 rounded-xl text-xs flex-[2]"
+                      />
+                      <select
+                        value={memoryImportance}
+                        onChange={(e) => setMemoryImportance(Number(e.target.value))}
+                        className="input-glass px-2 py-1.5 rounded-xl text-xs"
+                      >
+                        <option value={1}>Imp 1</option>
+                        <option value={2}>Imp 2</option>
+                        <option value={3}>Imp 3</option>
+                        <option value={4}>Imp 4</option>
+                        <option value={5}>Imp 5</option>
+                      </select>
+                      <button
+                        onClick={handleAddMemory}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold"
+                        style={{background:"rgba(16,185,129,0.18)", border:"1px solid rgba(16,185,129,0.35)", color:"#34d399"}}
+                      >
+                        Save Memory
+                      </button>
+                    </div>
+                    {memoryItems.length > 0 && (
+                      <div className="text-[11px] text-white/45 truncate">
+                        Memory loaded: {memoryItems.slice(0, 3).map((m) => `${m.memory_key}(${m.importance})`).join(" • ")}
+                      </div>
                     )}
                   </div>
                 )}
@@ -747,34 +967,69 @@ export default function DashboardPage() {
                   </div>
                   {/* Follow-up question chips */}
                   {followUps.length > 0 && !chatLoading && (
-                    <div className="mx-5 mb-2 flex flex-wrap gap-2 flex-shrink-0">
-                      {followUps.map((q, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSendChat(q)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-                          style={{background:"rgba(99,102,241,0.12)", border:"1px solid rgba(99,102,241,0.3)", color:"rgba(165,180,252,0.9)"}}
-                        >
-                          {q}
-                        </button>
-                      ))}
+                    <div className="mx-5 mb-2 rounded-xl flex-shrink-0" style={{background:"rgba(99,102,241,0.08)", border:"1px solid rgba(99,102,241,0.2)"}}>
+                      <button
+                        type="button"
+                        onClick={() => setFollowUpsOpen((v) => !v)}
+                        className="w-full px-3 py-2 text-xs font-semibold flex items-center justify-between text-indigo-300"
+                      >
+                        <span>Suggestions ({followUps.length})</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{transform: followUpsOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease"}}>
+                          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                      {followUpsOpen && (
+                        <div className="px-3 pb-3 flex flex-wrap gap-2">
+                          {followUps.map((q, i) => (
+                            <button
+                              key={i}
+                              onClick={() => handleSendChat(q)}
+                              className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                              style={{background:"rgba(99,102,241,0.12)", border:"1px solid rgba(99,102,241,0.3)", color:"rgba(165,180,252,0.9)"}}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* Live sources */}
                   {liveSources.length > 0 && (
-                    <div className="mx-5 mb-3 px-4 py-3 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(6,182,212,0.07)", border:"1px solid rgba(6,182,212,0.2)"}}>
-                      <p className="text-cyan-400 font-semibold mb-1.5 flex items-center gap-1.5">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="currentColor" strokeWidth="2"/></svg>
-                        Live web sources
-                      </p>
-                      <div className="space-y-1">
-                        {liveSources.map((url, i) => (
-                          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                            className="block truncate text-cyan-300/70 hover:text-cyan-300 transition-colors">
-                            {url}
-                          </a>
+                    <div className="mx-5 mb-3 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(6,182,212,0.07)", border:"1px solid rgba(6,182,212,0.2)"}}>
+                      <button
+                        type="button"
+                        onClick={() => setLiveSourcesOpen((v) => !v)}
+                        className="w-full px-4 py-2.5 text-cyan-400 font-semibold flex items-center justify-between"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="currentColor" strokeWidth="2"/></svg>
+                          Live web sources ({liveSources.length})
+                        </span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{transform: liveSourcesOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease"}}>
+                          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                      {liveSourcesOpen && (
+                        <div className="px-4 pb-3 space-y-1">
+                          {liveSources.map((url, i) => (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                              className="block truncate text-cyan-300/70 hover:text-cyan-300 transition-colors">
+                              {url}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {contradictionReport.length > 0 && (
+                    <div className="mx-5 mb-3 px-4 py-3 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(239,68,68,0.07)", border:"1px solid rgba(239,68,68,0.22)"}}>
+                      <p className="text-red-300 font-semibold mb-1.5">Contradiction Check</p>
+                      <ul className="space-y-1 text-red-200/80 list-disc pl-4">
+                        {contradictionReport.map((item, idx) => (
+                          <li key={idx}>{item}</li>
                         ))}
-                      </div>
+                      </ul>
                     </div>
                   )}
                   {/* Input */}
@@ -1200,15 +1455,44 @@ export default function DashboardPage() {
               {mobileChatTabs}
               {/* Document selector */}
               {chatTab === "chat" && (
-                documents.length > 0 ? (
-                  <select value={selectedDocId ?? ""} onChange={(e) => handleDocChange(Number(e.target.value))} className="input-glass w-full px-3 py-2 rounded-xl text-xs">
-                    {documents.map(d => <option key={d.id} value={d.id}>{d.filename}</option>)}
-                  </select>
-                ) : (
-                  <button onClick={() => setMobileTab("docs")} className="w-full py-2 rounded-xl text-xs text-indigo-300 font-medium" style={{background:"rgba(99,102,241,0.1)",border:"1px solid rgba(99,102,241,0.25)"}}>
-                    Upload a document to start →
-                  </button>
-                )
+                <div className="space-y-2">
+                  {documents.length > 0 ? (
+                    <>
+                      <select value={selectedDocId ?? ""} onChange={(e) => handleDocChange(Number(e.target.value))} className="input-glass w-full px-3 py-2 rounded-xl text-xs">
+                        {documents.map(d => <option key={d.id} value={d.id}>{d.filename}</option>)}
+                      </select>
+                      {documents.length > 1 && (
+                        <select
+                          multiple
+                          value={knowledgeDocIds.map(String)}
+                          onChange={(e) => {
+                            const vals = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
+                            setKnowledgeDocIds(vals);
+                          }}
+                          className="input-glass w-full px-3 py-2 rounded-xl text-xs"
+                        >
+                          {documents.filter(d => d.id !== selectedDocId).map((d) => (
+                            <option key={d.id} value={d.id}>{d.filename}</option>
+                          ))}
+                        </select>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px]" style={{background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)"}}>
+                          <input type="checkbox" checked={useMemory} onChange={(e) => setUseMemory(e.target.checked)} />
+                          <span className="text-white/70">Memory</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px]" style={{background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)"}}>
+                          <input type="checkbox" checked={contradictionCheck} onChange={(e) => setContradictionCheck(e.target.checked)} />
+                          <span className="text-white/70">Contradiction</span>
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <button onClick={() => setMobileTab("docs")} className="w-full py-2 rounded-xl text-xs text-indigo-300 font-medium" style={{background:"rgba(99,102,241,0.1)",border:"1px solid rgba(99,102,241,0.25)"}}>
+                      Upload a document to start →
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1247,24 +1531,61 @@ export default function DashboardPage() {
                 </div>
                 {/* Follow-ups */}
                 {followUps.length > 0 && !chatLoading && (
-                  <div className="px-4 pb-2 flex gap-2 overflow-x-auto flex-shrink-0" style={{scrollbarWidth:"none"}}>
-                    {followUps.map((q, i) => (
-                      <button key={i} onClick={() => handleSendChat(q)} className="px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap flex-shrink-0" style={{background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.3)",color:"rgba(165,180,252,0.9)"}}>
-                        {q}
-                      </button>
-                    ))}
+                  <div className="mx-4 mb-2 rounded-xl flex-shrink-0" style={{background:"rgba(99,102,241,0.08)", border:"1px solid rgba(99,102,241,0.2)"}}>
+                    <button
+                      type="button"
+                      onClick={() => setFollowUpsOpen((v) => !v)}
+                      className="w-full px-3 py-2 text-xs font-semibold flex items-center justify-between text-indigo-300"
+                    >
+                      <span>Suggestions ({followUps.length})</span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{transform: followUpsOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease"}}>
+                        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                    {followUpsOpen && (
+                      <div className="px-3 pb-3 flex gap-2 overflow-x-auto" style={{scrollbarWidth:"none"}}>
+                        {followUps.map((q, i) => (
+                          <button key={i} onClick={() => handleSendChat(q)} className="px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap flex-shrink-0" style={{background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.3)",color:"rgba(165,180,252,0.9)"}}>
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {/* Live sources */}
                 {liveSources.length > 0 && (
-                  <div className="mx-4 mb-2 px-3 py-2.5 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(6,182,212,0.07)",border:"1px solid rgba(6,182,212,0.2)"}}>
-                    <p className="text-cyan-400 font-semibold mb-1 flex items-center gap-1">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="currentColor" strokeWidth="2"/></svg>
-                      Live web sources
-                    </p>
-                    {liveSources.slice(0, 3).map((url, i) => (
-                      <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-cyan-300/70 hover:text-cyan-300">{url}</a>
-                    ))}
+                  <div className="mx-4 mb-2 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(6,182,212,0.07)",border:"1px solid rgba(6,182,212,0.2)"}}>
+                    <button
+                      type="button"
+                      onClick={() => setLiveSourcesOpen((v) => !v)}
+                      className="w-full px-3 py-2.5 text-cyan-400 font-semibold flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-1">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="currentColor" strokeWidth="2"/></svg>
+                        Live web sources ({liveSources.length})
+                      </span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{transform: liveSourcesOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease"}}>
+                        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                    {liveSourcesOpen && (
+                      <div className="px-3 pb-2.5">
+                        {liveSources.slice(0, 3).map((url, i) => (
+                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-cyan-300/70 hover:text-cyan-300">{url}</a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {contradictionReport.length > 0 && (
+                  <div className="mx-4 mb-2 px-3 py-2.5 rounded-xl text-xs flex-shrink-0" style={{background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.22)"}}>
+                    <p className="text-red-300 font-semibold mb-1">Contradiction Check</p>
+                    <ul className="space-y-1 text-red-200/80 list-disc pl-4">
+                      {contradictionReport.map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
                 {/* Input */}

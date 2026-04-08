@@ -115,14 +115,14 @@ steps:
       - --region=$_REGION
       - --platform=managed
       - --service-account=$_SA_EMAIL
-      - --set-env-vars=NODE_ENV=production
+      - --set-env-vars=NODE_ENV=production,API_BASE_URL=$_BACKEND_URL
       - --port=3000
       - --allow-unauthenticated
       - --memory=512Mi
       - --cpu=1
       - --min-instances=0
       - --max-instances=5
-      - --timeout=60
+      - --timeout=300
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/backend:${_IMAGE_TAG}

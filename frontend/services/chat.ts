@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -11,6 +11,22 @@ export interface ChatResponse {
   conversation_history: Message[];
   live_sources: string[];
   follow_up_questions: string[];
+  contradiction_report?: string[];
+  used_document_ids?: number[];
+}
+
+export interface ChatPreferences {
+  response_tone: string;
+  response_length: string;
+  language: string;
+  citation_style: string;
+}
+
+export interface UserMemoryItem {
+  id: number;
+  memory_key: string;
+  memory_value: string;
+  importance: number;
 }
 
 export async function sendChatMessage({
@@ -22,6 +38,9 @@ export async function sendChatMessage({
   liveMode = false,
   language = 'English',
   compareDocumentId,
+  documentIds = [],
+  useMemory = true,
+  contradictionCheck = true,
 }: {
   documentId: number;
   question: string;
@@ -31,14 +50,20 @@ export async function sendChatMessage({
   liveMode?: boolean;
   language?: string;
   compareDocumentId?: number;
+  documentIds?: number[];
+  useMemory?: boolean;
+  contradictionCheck?: boolean;
 }): Promise<ChatResponse> {
   const body: Record<string, unknown> = {
     document_id: documentId,
+    document_ids: documentIds,
     question,
     provider,
     conversation_history: conversationHistory,
     live_mode: liveMode,
     language,
+    use_memory: useMemory,
+    contradiction_check: contradictionCheck,
   };
   if (compareDocumentId) body.compare_document_id = compareDocumentId;
 
@@ -66,6 +91,9 @@ export async function streamChatMessage({
   liveMode = false,
   language = 'English',
   compareDocumentId,
+  documentIds = [],
+  useMemory = true,
+  contradictionCheck = true,
   onToken,
   onDone,
   onError,
@@ -78,22 +106,30 @@ export async function streamChatMessage({
   liveMode?: boolean;
   language?: string;
   compareDocumentId?: number;
+  documentIds?: number[];
+  useMemory?: boolean;
+  contradictionCheck?: boolean;
   onToken: (token: string) => void;
   onDone: (data: {
     conversation_id: number;
     conversation_history: Message[];
     live_sources: string[];
     follow_up_questions: string[];
+    contradiction_report?: string[];
+    used_document_ids?: number[];
   }) => void;
   onError: (error: string) => void;
 }): Promise<void> {
   const body: Record<string, unknown> = {
     document_id: documentId,
+    document_ids: documentIds,
     question,
     provider,
     conversation_history: conversationHistory,
     live_mode: liveMode,
     language,
+    use_memory: useMemory,
+    contradiction_check: contradictionCheck,
   };
   if (compareDocumentId) body.compare_document_id = compareDocumentId;
 
@@ -153,6 +189,66 @@ export async function getChatHistory(documentId: number, token: string): Promise
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || 'Failed to fetch chat history');
+  }
+  return res.json();
+}
+
+export async function getChatPreferences(token: string): Promise<ChatPreferences> {
+  const res = await fetch(`${API_BASE}/api/chat/preferences`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to fetch preferences');
+  }
+  return res.json();
+}
+
+export async function updateChatPreferences(
+  payload: ChatPreferences,
+  token: string,
+): Promise<ChatPreferences> {
+  const res = await fetch(`${API_BASE}/api/chat/preferences`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to update preferences');
+  }
+  return res.json();
+}
+
+export async function getChatMemory(token: string): Promise<UserMemoryItem[]> {
+  const res = await fetch(`${API_BASE}/api/chat/memory`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to fetch memory');
+  }
+  return res.json();
+}
+
+export async function addChatMemory(
+  payload: { memory_key: string; memory_value: string; importance?: number },
+  token: string,
+): Promise<UserMemoryItem> {
+  const res = await fetch(`${API_BASE}/api/chat/memory`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to add memory');
   }
   return res.json();
 }

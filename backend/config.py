@@ -47,7 +47,9 @@ SQLALCHEMY_ECHO = os.getenv("SQLALCHEMY_ECHO", "False").lower() == "true"
 SQLALCHEMY_POOL_RECYCLE = int(os.getenv("SQLALCHEMY_POOL_RECYCLE", "3600"))
 
 # JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "akash-vamsi-project-1")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable must be set")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
@@ -55,7 +57,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # LLM Configuration
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+# Up to 3 Groq API keys – tried in order; falls back to OpenAI when all are exhausted.
+_groq_key_1 = os.getenv("GROQ_API_KEY_1", os.getenv("GROQ_API_KEY", ""))
+_groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
+_groq_key_3 = os.getenv("GROQ_API_KEY_3", "")
+GROQ_API_KEYS: list[str] = [k for k in [_groq_key_1, _groq_key_2, _groq_key_3] if k]
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Resend Email Configuration
@@ -65,6 +71,10 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "openai"
 GROQ_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Live web verification configuration
+WEB_MIN_CONFIDENCE = int(os.getenv("WEB_MIN_CONFIDENCE", "75"))
+WEB_TRUSTED_ONLY = os.getenv("WEB_TRUSTED_ONLY", "true").lower() == "true"
 
 print(f"✓ Environment: {ENVIRONMENT}")
 print(f"✓ Database: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}")

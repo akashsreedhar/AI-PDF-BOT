@@ -48,3 +48,36 @@ class Conversation(Base):
 
     class Config:
         from_attributes = True
+
+
+class UserPreference(Base):
+    """Per-user response preferences for personalization."""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True, nullable=False)
+    response_tone = Column(String(64), default="balanced", nullable=False)
+    response_length = Column(String(32), default="medium", nullable=False)
+    language = Column(String(64), default="English", nullable=False)
+    citation_style = Column(String(32), default="inline", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    class Config:
+        from_attributes = True
+
+
+class UserMemory(Base):
+    """Simple key-value memory items stored for each user."""
+    __tablename__ = "user_memories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    memory_key = Column(String(128), nullable=False)
+    memory_value = Column(Text, nullable=False)
+    importance = Column(Integer, default=3, nullable=False)  # 1(low) - 5(high)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    class Config:
+        from_attributes = True
