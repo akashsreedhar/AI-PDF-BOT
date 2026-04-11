@@ -1,10 +1,13 @@
-from typing import Generator, Literal, List, Dict
+import base64
+from typing import Any, Dict, Generator, List, Literal
 
 from config import (
     GROQ_API_KEYS,
     OPENAI_API_KEY,
     GROQ_DEFAULT_MODEL,
     OPENAI_DEFAULT_MODEL,
+    GROQ_VISION_MODEL,
+    OPENAI_VISION_MODEL,
 )
 
 # Errors that signal a Groq key should be skipped (rate-limit / quota exhausted).
@@ -17,7 +20,7 @@ def _is_groq_rate_limit(exc: Exception) -> bool:
     return any(marker in msg for marker in _GROQ_SKIP_ERRORS)
 
 
-def _try_groq(messages: List[Dict[str, str]], model: str) -> str:
+def _try_groq(messages: List[Dict[str, Any]], model: str) -> str:
     """
     Attempt the request against each Groq key in order.
     Returns the assistant reply on success, or raises if all keys are exhausted.
@@ -43,7 +46,7 @@ def _try_groq(messages: List[Dict[str, str]], model: str) -> str:
 
 
 def _stream_groq(
-    messages: List[Dict[str, str]], model: str
+    messages: List[Dict[str, Any]], model: str
 ) -> Generator[str, None, None]:
     """Stream tokens from Groq, trying each key in order on rate-limit errors."""
     from groq import Groq
@@ -72,7 +75,7 @@ def _stream_groq(
     raise last_exc  # all keys exhausted
 
 
-def _call_openai(messages: List[Dict[str, str]], model: str) -> str:
+def _call_openai(messages: List[Dict[str, Any]], model: str) -> str:
     from openai import OpenAI
 
     if not OPENAI_API_KEY:
@@ -83,7 +86,7 @@ def _call_openai(messages: List[Dict[str, str]], model: str) -> str:
 
 
 def _stream_openai(
-    messages: List[Dict[str, str]], model: str
+    messages: List[Dict[str, Any]], model: str
 ) -> Generator[str, None, None]:
     from openai import OpenAI
 
@@ -168,4 +171,41 @@ def stream_llm_response(
         raise ValueError(
             f"Unsupported LLM provider: '{provider}'. Choose 'groq' or 'openai'."
         )
+
+
+def extract_text_from_image_with_llm(
+    image_bytes: bytes,
+    mime_type: str = "image/png",
+    provider: Literal["groq", "openai"] = "groq",
+    model: str | None = None,
+) -> str:
+    """
+    Extract text from an image using the same configured LLM provider credentials.
+    This avoids requiring a separate OCR API key.
+    """
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime_type};base64,{image_b64}"
+
+    messages: List[Dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                "You are an OCR assistant. Extract all readable text from the image exactly as written. "
+                "Preserve logical line breaks. Return only extracted text with no extra commentary."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Extract text from this image."},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        },
+    ]
+
+    if provider == "groq":
+        return _try_groq(messages, model or GROQ_VISION_MODEL)
+    if provider == "openai":
+        return _call_openai(messages, model or OPENAI_VISION_MODEL)
+    raise ValueError(f"Unsupported LLM provider: '{provider}'. Choose 'groq' or 'openai'.")
 

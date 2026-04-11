@@ -1,7 +1,7 @@
 // services/auth.ts
 // API abstraction for authentication
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+import { API_BASE_URL } from './api';
 
 async function parseError(res: Response, fallback: string): Promise<Error> {
   try {
@@ -57,6 +57,18 @@ export async function resetPassword({ token, new_password }: { token: string; ne
   });
   if (!res.ok) {
     throw await parseError(res, 'Failed to reset password');
+  }
+  return res.json();
+}
+
+export async function googleAuth({ idToken }: { idToken: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/google-auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id_token: idToken }),
+  });
+  if (!res.ok) {
+    throw await parseError(res, 'Google signup failed');
   }
   return res.json();
 }

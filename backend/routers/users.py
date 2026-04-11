@@ -3,15 +3,26 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import resend
+from google.auth.transport.requests import Request
+from google.oauth2 import id_token
 from database import get_db
 from models import User as UserModel
-from schemas import UserCreate, UserUpdate, UserResponse, SignupRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest
+from schemas import UserCreate, UserUpdate, UserResponse, SignupRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, GoogleAuthRequest
 from utils.authentication import get_current_user, create_access_token
-from config import RESEND_API_KEY, RESEND_FROM_EMAIL, FRONTEND_URL
+from config import RESEND_API_KEY, RESEND_FROM_EMAIL, FRONTEND_URL, GOOGLE_CLIENT_ID
 
 resend.api_key = RESEND_API_KEY
 
 router = APIRouter()
+
+
+@router.get("/google-config")
+def google_config():
+    """Expose public Google auth configuration for frontend runtime fallback."""
+    return {
+        "enabled": bool(GOOGLE_CLIENT_ID),
+        "client_id": GOOGLE_CLIENT_ID if GOOGLE_CLIENT_ID else ""
+    }
 
 
 @router.post("/login")
@@ -51,6 +62,50 @@ def signup(data: SignupRequest, db: Session = Depends(get_db)):
         "token": access_token,
         "token_type": "bearer",
         "user": {"id": new_user.id, "name": new_user.name, "email": new_user.email}
+    }
+
+
+@router.post("/google-auth")
+def google_auth(data: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Authenticate with Google ID token, creating the user if needed."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google authentication is not configured"
+        )
+
+    try:
+        token_payload = id_token.verify_oauth2_token(data.id_token, Request(), GOOGLE_CLIENT_ID)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google token"
+        )
+
+    email = token_payload.get("email")
+    email_verified = token_payload.get("email_verified", False)
+    name = token_payload.get("name") or (email.split("@")[0] if email else "Google User")
+
+    if not email or not email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google account email is not verified"
+        )
+
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    if user is None:
+        # Local password remains required by schema, so create a random one for OAuth-only users.
+        user = UserModel(name=name, email=email, password=secrets.token_urlsafe(32))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    access_token = create_access_token(data={"sub": user.name, "id": user.id, "email": user.email})
+    return {
+        "message": "Google authentication successful",
+        "token": access_token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "name": user.name, "email": user.email}
     }
 
 @router.post("/forgot_password")

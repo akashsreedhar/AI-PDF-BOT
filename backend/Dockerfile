@@ -19,6 +19,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# OCR runtime dependencies (Tesseract + English language pack)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    libglib2.0-0 \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy installed Python packages from builder stage
 COPY --from=builder /install /usr/local
 # Copy cached HuggingFace models
@@ -32,6 +40,7 @@ RUN mkdir -p /app/data/uploads /app/data/faiss_indexes
 
 # Cloud Run injects PORT env var (default 8080)
 ENV PORT=8080
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 EXPOSE 8080
 
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]

@@ -11,7 +11,7 @@ interface Props {
   compact?: boolean;
 }
 
-export default function MarkdownMessage({ content, role = "assistant", compact = false }: Props) {
+export default function MarkdownMessage({ content, compact = false }: Props) {
   const base = compact ? "text-xs" : "text-sm";
 
   const components: Components = {

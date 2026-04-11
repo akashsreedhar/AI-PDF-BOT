@@ -11,6 +11,10 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const homeHref = isLoggedIn ? '/dashboard' : '/';
+  const navItems = isLoggedIn
+    ? [{ href: '/dashboard', label: 'Dashboard' }]
+    : [{ href: '/', label: 'Home' }];
 
   useEffect(() => {
     const checkAuth = () => setIsLoggedIn(!!localStorage.getItem('jwt'));
@@ -48,7 +52,7 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-3.5">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group flex-shrink-0">
+        <Link href={homeHref} className="flex items-center gap-2.5 group flex-shrink-0">
           <div
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:shadow-lg"
             style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 0 18px rgba(99,102,241,0.28)' }}
@@ -65,10 +69,7 @@ export default function Navbar() {
 
         {/* Nav links - desktop */}
         <div className="hidden md:flex items-center gap-0.5">
-          {[
-            { href: '/', label: 'Home' },
-            ...(isLoggedIn ? [{ href: '/dashboard', label: 'Dashboard' }] : []),
-          ].map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -155,7 +156,9 @@ export default function Navbar() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden border-t border-white/5 px-6 py-4 space-y-1 animate-fade-up-sm">
-          <Link href="/" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">Home</Link>
+          {!isLoggedIn && (
+            <Link href="/" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">Home</Link>
+          )}
           {isLoggedIn ? (
             <>
               <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors">Dashboard</Link>

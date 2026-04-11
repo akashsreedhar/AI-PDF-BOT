@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getDocuments, uploadDocuments, deleteDocument, Document } from "@/services/documents";
 import {
@@ -14,6 +14,7 @@ import {
   QuizQuestion,
   sendChatMessage,
   streamChatMessage,
+  streamWebOnlyChat,
   updateChatPreferences,
   UserMemoryItem,
 } from "@/services/chat";
@@ -21,11 +22,17 @@ import MarkdownMessage from "@/components/MarkdownMessage";
 import AgentThinking from "@/components/AgentThinking";
 
 const LANGUAGES = ["English","Hindi","Telugu","Tamil","Malayalam","Spanish","French","German","Arabic","Chinese","Japanese"];
+const LIVE_MODE_PROMPT = "Select Live mode to get the latest trends without uploading a document.";
+const ASSISTANT_WELCOME = `Hello! Upload a document and I'll help you extract insights instantly. ✨\n\n${LIVE_MODE_PROMPT}`;
 
 const quickActions = [
   {
     icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="17,8 12,3 7,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="3" x2="12" y2="15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>),
     title: "Upload Document", color: "#6366f1", bg: "rgba(99,102,241,0.12)", action: "upload",
+  },
+  {
+    icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="13" r="4" stroke="currentColor" strokeWidth="2"/></svg>),
+    title: "Use Camera", color: "#14b8a6", bg: "rgba(20,184,166,0.12)", action: "camera",
   },
   {
     icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>),
@@ -44,23 +51,27 @@ const quickActions = [
 export default function DashboardPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const [mounted, setMounted] = useState(false);
   const [userName, setUserName] = useState("there");
-  const [dragOver, setDragOver] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Documents
   const [documents, setDocuments] = useState<Document[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState("");
   const [summaryDocId, setSummaryDocId] = useState<number | null>(null); // doc whose summary card is open
+  const [deletingDocId, setDeletingDocId] = useState<number | null>(null);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hello! Upload a document and I'll help you extract insights instantly. ✨" },
+    { role: "assistant", content: ASSISTANT_WELCOME },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -111,7 +122,7 @@ export default function DashboardPage() {
   const [mobileTab, setMobileTab] = useState<"home" | "docs" | "chat">("home");
   const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchDocuments = async (token: string) => {
+  const fetchDocuments = useCallback(async (token: string) => {
     setDocsLoading(true);
     try {
       const docs = await getDocuments(token);
@@ -122,7 +133,7 @@ export default function DashboardPage() {
     } finally {
       setDocsLoading(false);
     }
-  };
+  }, [selectedDocId]);
 
   const fetchUserSettings = async (token: string) => {
     try {
@@ -222,7 +233,7 @@ export default function DashboardPage() {
     return () => {
       if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
     };
-  }, [router]);
+  }, [fetchDocuments, router]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -237,6 +248,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (liveSources.length === 0) setLiveSourcesOpen(false);
   }, [liveSources]);
+
+  useEffect(() => {
+    return () => {
+      stopCameraStream();
+    };
+  }, []);
 
   const fetchHistory = async (docId: number) => {
     const token = localStorage.getItem("jwt");
@@ -281,7 +298,6 @@ export default function DashboardPage() {
     const token = localStorage.getItem("jwt");
     if (!token) return;
     setUploading(true);
-    setUploadError("");
     showToast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`, "loading");
     try {
       await uploadDocuments(Array.from(files), token);
@@ -289,26 +305,103 @@ export default function DashboardPage() {
       showToast("Document uploaded successfully!", "success");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Upload failed";
-      setUploadError(msg);
       showToast(msg, "error");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleDelete = async (docId: number) => {
-    const token = localStorage.getItem("jwt");
-    if (!token) return;
+  const stopCameraStream = () => {
+    const video = cameraVideoRef.current;
+    const stream = video?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((track) => track.stop());
+    if (video) video.srcObject = null;
+  };
+
+  const handleOpenCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("Camera is not supported on this device/browser", "error");
+      return;
+    }
+
+    setCameraError("");
+    setCameraLoading(true);
+    setCameraOpen(true);
     try {
-      await deleteDocument(docId, token);
-      setDocuments((prev) => prev.filter((d) => d.id !== docId));
-      if (selectedDocId === docId) setSelectedDocId(documents.find((d) => d.id !== docId)?.id ?? null);
-    } catch { /* ignore */ }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+      });
+      const video = cameraVideoRef.current;
+      if (!video) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("Camera preview unavailable.");
+      }
+      video.srcObject = stream;
+      await video.play();
+    } catch (e: unknown) {
+      setCameraError(e instanceof Error ? e.message : "Unable to access camera");
+      showToast("Unable to access camera", "error");
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
+  const handleCloseCamera = () => {
+    stopCameraStream();
+    setCameraOpen(false);
+    setCameraError("");
+  };
+
+  const handleCaptureAndUpload = async () => {
+    const video = cameraVideoRef.current;
+    const canvas = cameraCanvasRef.current;
+    const token = localStorage.getItem("jwt");
+    if (!video || !canvas || !token) return;
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      showToast("Could not access camera frame", "error");
+      return;
+    }
+
+    ctx.drawImage(video, 0, 0, width, height);
+    setUploading(true);
+    setCameraLoading(true);
+    showToast("Uploading captured image...", "loading");
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        setUploading(false);
+        setCameraLoading(false);
+        showToast("Failed to capture image", "error");
+        return;
+      }
+      try {
+        const file = new File([blob], `camera-capture-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        await uploadDocuments([file], token);
+        await fetchDocuments(token);
+        showToast("Photo uploaded successfully!", "success");
+        handleCloseCamera();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Image upload failed";
+        showToast(msg, "error");
+      } finally {
+        setUploading(false);
+        setCameraLoading(false);
+      }
+    }, "image/jpeg", 0.92);
   };
 
   const handleNewChat = () => {
     setChatMessages([
-      { role: "assistant", content: "Hello! Upload a document and I\u2019ll help you extract insights instantly. \u2728" },
+      { role: "assistant", content: ASSISTANT_WELCOME },
     ]);
     setChatInput("");
     setChatError("");
@@ -351,11 +444,48 @@ export default function DashboardPage() {
     }
   };
 
+  const handleDeleteDocument = async (docId: number) => {
+    const token = localStorage.getItem("jwt");
+    if (!token || deletingDocId !== null) return;
+
+    const doc = documents.find((d) => d.id === docId);
+    const confirmDelete = window.confirm(
+      `Delete "${doc?.filename ?? "this document"}"? This will also remove its vector index.`
+    );
+    if (!confirmDelete) return;
+
+    setDeletingDocId(docId);
+    showToast("Deleting document...", "loading");
+    try {
+      await deleteDocument(docId, token);
+      setDocuments((prev) => {
+        const next = prev.filter((d) => d.id !== docId);
+        if (selectedDocId === docId) setSelectedDocId(next[0]?.id ?? null);
+        if (historyDocId === docId) setHistoryDocId(next[0]?.id ?? null);
+        return next;
+      });
+      setSummaryDocId((prev) => (prev === docId ? null : prev));
+      setCompareDocId((prev) => (prev === docId ? null : prev));
+      setKnowledgeDocIds((prev) => prev.filter((id) => id !== docId));
+      showToast("Document deleted successfully", "success");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "Failed to delete document", "error");
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
+
   const handleSendChat = async (overrideQuestion?: string) => {
     const question = (overrideQuestion ?? chatInput).trim();
-    if (!question || !selectedDocId || chatLoading) return;
+    if (!question || chatLoading) return;
     const token = localStorage.getItem("jwt");
     if (!token) return;
+
+    // Web-only mode: no document needed when live mode is on
+    if (!selectedDocId && !liveMode) {
+      showToast(LIVE_MODE_PROMPT, "error");
+      return;
+    }
 
     if (!overrideQuestion) setChatInput("");
     setChatError("");
@@ -363,7 +493,7 @@ export default function DashboardPage() {
     setFollowUps([]);
     setContradictionReport([]);
     const history = chatMessages.filter((m) => m.role !== "assistant" || chatMessages.indexOf(m) > 0);
-    const extraDocIds = Array.from(new Set(knowledgeDocIds.filter((id) => id !== selectedDocId)));
+    const extraDocIds = selectedDocId ? Array.from(new Set(knowledgeDocIds.filter((id) => id !== selectedDocId))) : [];
 
     // Add user message + empty assistant placeholder atomically
     setChatMessages((prev) => [
@@ -374,6 +504,35 @@ export default function DashboardPage() {
     setChatLoading(true);
 
     try {
+      // If no document is selected, use web-only streaming chat
+      if (!selectedDocId) {
+        await streamWebOnlyChat({
+          question,
+          conversationHistory: history.slice(-10),
+          token,
+          language,
+          useMemory,
+          onToken: (tok) => {
+            setChatMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = { ...last, content: last.content + tok };
+              return updated;
+            });
+          },
+          onDone: (data) => {
+            if (data.live_sources?.length) setLiveSources(data.live_sources);
+            setFollowUps(data.follow_up_questions || []);
+            setContradictionReport(data.contradiction_report || []);
+          },
+          onError: (err) => {
+            setChatError(err);
+            setChatMessages((prev) => prev.slice(0, -1));
+          },
+        });
+        return;
+      }
+
       await streamChatMessage({
         documentId: selectedDocId,
         question,
@@ -494,13 +653,37 @@ export default function DashboardPage() {
         type="file"
         ref={fileInputRef}
         multiple
-        accept=".pdf,.txt"
+        accept=".pdf,.txt,.md,.docx,.csv,.xlsx,.json,.html,.htm,.pptx,.png,.jpg,.jpeg,.webp,.bmp,.tiff"
         className="hidden"
         onChange={(e) => {
           handleFiles(e.target.files);
           if (fileInputRef.current) fileInputRef.current.value = "";
         }}
       />
+      <canvas ref={cameraCanvasRef} className="hidden" />
+
+      {cameraOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center px-4" style={{background:"rgba(3,6,20,0.86)", backdropFilter:"blur(10px)"}}>
+          <div className="w-full max-w-2xl rounded-2xl overflow-hidden" style={{background:"rgba(9,12,30,0.96)", border:"1px solid rgba(255,255,255,0.12)"}}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <h3 className="text-sm font-bold text-white">Capture Document Photo</h3>
+              <button onClick={handleCloseCamera} className="text-white/60 hover:text-white text-sm">Close</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="rounded-xl overflow-hidden" style={{background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)"}}>
+                <video ref={cameraVideoRef} autoPlay playsInline muted className="w-full max-h-[60vh] object-cover" />
+              </div>
+              {cameraError && <p className="text-xs text-red-300">{cameraError}</p>}
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={handleCloseCamera} className="px-3 py-2 rounded-xl text-xs font-semibold text-white/70" style={{background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)"}}>Cancel</button>
+                <button onClick={handleCaptureAndUpload} disabled={cameraLoading} className="px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-60" style={{background:"linear-gradient(135deg,#14b8a6,#0d9488)", color:"white"}}>
+                  {cameraLoading ? "Processing..." : "Capture & Upload"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast notification */}
       {toastMessage && (
@@ -608,6 +791,7 @@ export default function DashboardPage() {
                     key={i}
                     onClick={() => {
                       if (a.action === "upload") fileInputRef.current?.click();
+                      else if (a.action === "camera") handleOpenCamera();
                       else if (a.action === "chat") handleNewChat();
                       else if (a.action === "search") searchInputRef.current?.focus();
                       else if (a.action === "summarize") handleSummarize();
@@ -635,7 +819,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-white/30 py-4 text-center">Loading documents…</p>
               )}
               {!docsLoading && documents.length === 0 && (
-                <p className="text-xs text-white/30 py-4 text-center">No documents yet. Upload a PDF or TXT to get started.</p>
+                <p className="text-xs text-white/30 py-4 text-center">No documents yet. Upload docs/images or use camera to get started.</p>
               )}
               {!docsLoading && documents.length > 0 && filteredDocs.length === 0 && (
                 <p className="text-xs text-white/30 py-4 text-center">No results for &quot;{searchQuery}&quot;</p>
@@ -689,6 +873,14 @@ export default function DashboardPage() {
                             className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
                           >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2"/></svg>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id); }}
+                            title="Delete document"
+                            disabled={deletingDocId === doc.id}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                           </button>
                         </div>
                       </div>
@@ -1039,13 +1231,13 @@ export default function DashboardPage() {
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendChat()}
-                        placeholder={selectedDocId ? "Ask anything about your document…" : "Select a document first…"}
-                        disabled={!selectedDocId || chatLoading}
+                        placeholder={selectedDocId ? "Ask anything about your document…" : liveMode ? "Ask anything — I'll search the web for you…" : "Select a document or enable Live Web Mode…"}
+                        disabled={(!selectedDocId && !liveMode) || chatLoading}
                         className="input-glass flex-1 px-4 py-3 rounded-xl text-sm disabled:opacity-40"
                       />
                       <button
                         onClick={() => handleSendChat()}
-                        disabled={!selectedDocId || chatLoading || !chatInput.trim()}
+                        disabled={(!selectedDocId && !liveMode) || chatLoading || !chatInput.trim()}
                         className="btn-primary w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -1313,6 +1505,7 @@ export default function DashboardPage() {
                     key={i}
                     onClick={() => {
                       if (a.action === "upload") fileInputRef.current?.click();
+                      else if (a.action === "camera") handleOpenCamera();
                       else if (a.action === "chat") { handleNewChat(); setMobileTab("chat"); }
                       else if (a.action === "summarize") { handleSummarize(); setMobileTab("chat"); }
                       else if (a.action === "quiz") { handleStartQuiz(); setMobileTab("chat"); }
@@ -1359,7 +1552,16 @@ export default function DashboardPage() {
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><polyline points="17,8 12,3 7,8" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="3" x2="12" y2="15" stroke="#6366f1" strokeWidth="2" strokeLinecap="round"/></svg>
               )}
               <span className="text-sm font-semibold text-indigo-300">{uploading ? "Uploading…" : "Upload Document"}</span>
-              <span className="text-xs text-white/30">PDF or TXT</span>
+              <span className="text-xs text-white/30">PDF, Office, text, or images</span>
+            </button>
+            <button
+              onClick={handleOpenCamera}
+              disabled={uploading}
+              className="w-full rounded-2xl p-4 flex items-center justify-center gap-2 font-semibold text-sm disabled:opacity-60"
+              style={{background:"rgba(20,184,166,0.12)", border:"1px solid rgba(20,184,166,0.35)", color:"#5eead4"}}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="13" r="4" stroke="currentColor" strokeWidth="2"/></svg>
+              Scan Using Camera
             </button>
           </div>
         )}
@@ -1377,6 +1579,9 @@ export default function DashboardPage() {
               <button onClick={() => fileInputRef.current?.click()} className="btn-primary w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" disabled={uploading}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><line x1="12" y1="5" x2="12" y2="19" stroke="white" strokeWidth="2.5" strokeLinecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="white" strokeWidth="2.5" strokeLinecap="round"/></svg>
               </button>
+              <button onClick={handleOpenCamera} className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" disabled={uploading} style={{background:"rgba(20,184,166,0.18)", border:"1px solid rgba(20,184,166,0.35)", color:"#5eead4"}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="13" r="4" stroke="currentColor" strokeWidth="2"/></svg>
+              </button>
             </div>
 
             {docsLoading && <p className="text-xs text-white/30 py-8 text-center">Loading…</p>}
@@ -1386,7 +1591,7 @@ export default function DashboardPage() {
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#6366f1" strokeWidth="1.8"/><polyline points="14,2 14,8 20,8" stroke="#6366f1" strokeWidth="1.8"/></svg>
                 </div>
                 <p className="text-sm text-white/40">No documents yet</p>
-                <button onClick={() => fileInputRef.current?.click()} className="btn-primary px-4 py-2 rounded-xl text-sm font-semibold">Upload your first PDF</button>
+                <button onClick={() => fileInputRef.current?.click()} className="btn-primary px-4 py-2 rounded-xl text-sm font-semibold">Upload your first document</button>
               </div>
             )}
             <div className="space-y-2.5">
@@ -1394,24 +1599,58 @@ export default function DashboardPage() {
                 const colors = ["#6366f1","#8b5cf6","#06b6d4","#ec4899"];
                 const color = colors[i % colors.length];
                 const isActive = selectedDocId === doc.id;
+                const showSummary = summaryDocId === doc.id;
                 return (
-                  <div
-                    key={doc.id}
-                    onClick={() => { handleDocChange(doc.id); setMobileTab("chat"); }}
-                    className="glass-card rounded-2xl px-4 py-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
-                    style={{ borderColor: isActive ? `${color}55` : undefined, background: isActive ? `${color}10` : undefined, boxShadow: isActive ? `inset 3px 0 0 ${color}` : undefined }}
-                  >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{background:`${color}18`}}>
-                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke={color} strokeWidth="1.8" strokeLinejoin="round"/><polyline points="14,2 14,8 20,8" stroke={color} strokeWidth="1.8"/></svg>
+                  <div key={doc.id}>
+                    <div
+                      onClick={() => { handleDocChange(doc.id); setMobileTab("chat"); }}
+                      className="glass-card rounded-2xl px-4 py-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
+                      style={{ borderColor: isActive ? `${color}55` : undefined, background: isActive ? `${color}10` : undefined, boxShadow: isActive ? `inset 3px 0 0 ${color}` : undefined }}
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{background:`${color}18`}}>
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke={color} strokeWidth="1.8" strokeLinejoin="round"/><polyline points="14,2 14,8 20,8" stroke={color} strokeWidth="1.8"/></svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{doc.doc_title || doc.filename}</p>
+                        <p className="text-xs text-white/35">{new Date(doc.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {doc.summary && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSummaryDocId(showSummary ? null : doc.id); }}
+                            title="View summary"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id); }}
+                          title="Delete document"
+                          disabled={deletingDocId === doc.id}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        </button>
+                        {isActive ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md flex-shrink-0" style={{background:`${color}22`, color}}>Active</span>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-white/25 flex-shrink-0"><polyline points="9,18 15,12 9,6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{doc.doc_title || doc.filename}</p>
-                      <p className="text-xs text-white/35">{new Date(doc.created_at).toLocaleDateString()}</p>
-                    </div>
-                    {isActive ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md flex-shrink-0" style={{background:`${color}22`, color}}>Active</span>
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-white/25 flex-shrink-0"><polyline points="9,18 15,12 9,6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    {showSummary && doc.summary && (
+                      <div className="mx-1 mt-1 mb-1 px-4 py-3 rounded-xl text-xs" style={{background:"rgba(245,158,11,0.06)", border:"1px solid rgba(245,158,11,0.2)"}}>
+                        {doc.doc_title && <p className="font-bold text-amber-300 mb-1.5">{doc.doc_title}</p>}
+                        <p className="text-white/60 leading-relaxed mb-2">{doc.summary}</p>
+                        {doc.key_topics && doc.key_topics.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {doc.key_topics.map((t, ti) => (
+                              <span key={ti} className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{background:"rgba(245,158,11,0.15)", color:"#fbbf24"}}>{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
@@ -1595,13 +1834,13 @@ export default function DashboardPage() {
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendChat()}
-                      placeholder={selectedDocId ? "Ask about your document…" : "Select a document first…"}
-                      disabled={!selectedDocId || chatLoading}
+                      placeholder={selectedDocId ? "Ask about your document…" : liveMode ? "Ask anything — I'll search the web for you…" : "Select Live mode to get latest trends without a document…"}
+                      disabled={(!selectedDocId && !liveMode) || chatLoading}
                       className="input-glass flex-1 px-4 py-3 rounded-xl text-sm disabled:opacity-40"
                     />
                     <button
                       onClick={() => handleSendChat()}
-                      disabled={!selectedDocId || chatLoading || !chatInput.trim()}
+                      disabled={(!selectedDocId && !liveMode) || chatLoading || !chatInput.trim()}
                       className="btn-primary w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40"
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M22 2L15 22 11 13 2 9l20-7z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>

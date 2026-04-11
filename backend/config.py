@@ -76,13 +76,16 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "aidocchat@hireplz.live")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "openai"
 GROQ_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
 
 # Live web verification configuration
-WEB_MIN_CONFIDENCE = int(os.getenv("WEB_MIN_CONFIDENCE", "75"))
-WEB_TRUSTED_ONLY = os.getenv("WEB_TRUSTED_ONLY", "true").lower() == "true"
+WEB_MIN_CONFIDENCE = int(os.getenv("WEB_MIN_CONFIDENCE", "50"))
+WEB_TRUSTED_ONLY = os.getenv("WEB_TRUSTED_ONLY", "false").lower() == "true"
 
 print(f"✓ Environment: {ENVIRONMENT}")
 print(f"✓ Database: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}")

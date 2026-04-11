@@ -1,4 +1,35 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+import { API_BASE_URL } from './api';
+
+const API_BASE = API_BASE_URL;
+
+async function getErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      if (data && typeof data === 'object') {
+        if ('detail' in data && typeof data.detail === 'string' && data.detail.trim()) {
+          return data.detail;
+        }
+        if ('message' in data && typeof data.message === 'string' && data.message.trim()) {
+          return data.message;
+        }
+      }
+    }
+
+    const text = (await res.text()).trim();
+    if (text) {
+      return text;
+    }
+  } catch {
+    // Ignore parser errors and fall through to fallback.
+  }
+
+  if (res.status) {
+    return `${fallback} (HTTP ${res.status})`;
+  }
+  return fallback;
+}
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -76,8 +107,7 @@ export async function sendChatMessage({
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Chat request failed');
+    throw new Error(await getErrorMessage(res, 'Chat request failed'));
   }
   return res.json();
 }
@@ -143,8 +173,7 @@ export async function streamChatMessage({
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    onError(err.detail || 'Chat request failed');
+    onError(await getErrorMessage(res, 'Chat request failed'));
     return;
   }
 
@@ -182,13 +211,86 @@ export interface ConversationRecord {
   conversation_history: Message[];
 }
 
+export async function streamWebOnlyChat({
+  question,
+  conversationHistory,
+  token,
+  provider = 'groq',
+  language = 'English',
+  useMemory = true,
+  onToken,
+  onDone,
+  onError,
+}: {
+  question: string;
+  conversationHistory: Message[];
+  token: string;
+  provider?: 'groq' | 'openai';
+  language?: string;
+  useMemory?: boolean;
+  onToken: (token: string) => void;
+  onDone: (data: {
+    conversation_id: number;
+    conversation_history: Message[];
+    live_sources: string[];
+    follow_up_questions: string[];
+    contradiction_report?: string[];
+    used_document_ids?: number[];
+  }) => void;
+  onError: (error: string) => void;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chat/web/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      question,
+      provider,
+      conversation_history: conversationHistory,
+      language,
+      use_memory: useMemory,
+    }),
+  });
+
+  if (!res.ok) {
+    onError(await getErrorMessage(res, 'Web chat request failed'));
+    return;
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6));
+        if (event.type === 'token') {
+          onToken(event.content);
+        } else if (event.type === 'done') {
+          onDone(event);
+        } else if (event.type === 'error') {
+          onError(event.detail);
+        }
+      } catch { /* ignore malformed events */ }
+    }
+  }
+}
+
 export async function getChatHistory(documentId: number, token: string): Promise<ConversationRecord[]> {
   const res = await fetch(`${API_BASE}/api/chat/history/${documentId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to fetch chat history');
+    throw new Error(await getErrorMessage(res, 'Failed to fetch chat history'));
   }
   return res.json();
 }
@@ -198,8 +300,7 @@ export async function getChatPreferences(token: string): Promise<ChatPreferences
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to fetch preferences');
+    throw new Error(await getErrorMessage(res, 'Failed to fetch preferences'));
   }
   return res.json();
 }
@@ -217,8 +318,7 @@ export async function updateChatPreferences(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to update preferences');
+    throw new Error(await getErrorMessage(res, 'Failed to update preferences'));
   }
   return res.json();
 }
@@ -228,8 +328,7 @@ export async function getChatMemory(token: string): Promise<UserMemoryItem[]> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to fetch memory');
+    throw new Error(await getErrorMessage(res, 'Failed to fetch memory'));
   }
   return res.json();
 }
@@ -247,8 +346,7 @@ export async function addChatMemory(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to add memory');
+    throw new Error(await getErrorMessage(res, 'Failed to add memory'));
   }
   return res.json();
 }
@@ -272,8 +370,7 @@ export async function generateQuiz(
     body: JSON.stringify({ document_id: documentId, num_questions: numQuestions, language }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to generate quiz');
+    throw new Error(await getErrorMessage(res, 'Failed to generate quiz'));
   }
   const data = await res.json();
   return data.questions;

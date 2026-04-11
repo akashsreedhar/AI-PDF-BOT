@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+import { API_BASE_URL } from './api';
+
+const API_BASE = API_BASE_URL;
 
 export interface Document {
   id: number;

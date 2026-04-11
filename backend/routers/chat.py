@@ -11,6 +11,11 @@ from config import DEFAULT_LLM_PROVIDER, WEB_MIN_CONFIDENCE, WEB_TRUSTED_ONLY
 from database import get_db
 from models import Conversation, Document, UserMemory, UserPreference
 from utils.authentication import get_current_user
+from utils.context_engineering import (
+    build_document_context_block,
+    build_relevant_history,
+    build_web_context_block,
+)
 from utils.llm_client import get_llm_response, stream_llm_response
 from utils.rag_builder import load_faiss_index
 from utils.web_search import (
@@ -287,12 +292,15 @@ def chat(
         results = vector_store.max_marginal_relevance_search(
             request.question, k=k_value, fetch_k=MMR_FETCH_K
         )
-        doc_context = "\n\n---\n\n".join(chunk.page_content for chunk in results)
         title = doc_by_id[doc_id].doc_title or doc_by_id[doc_id].filename
-        context_parts.append(f"[Document {doc_id}: {title}]\n{doc_context}")
-        contradiction_inputs.append(
-            f"Document {doc_id} ({title}) excerpt:\n{doc_context[:1800]}"
+        doc_context, contradiction_excerpt = build_document_context_block(
+            request.question,
+            title,
+            doc_id,
+            results,
         )
+        context_parts.append(doc_context)
+        contradiction_inputs.append(contradiction_excerpt)
 
     context = "\n\n====================\n\n".join(context_parts)
     contradiction_report: List[str] = []
@@ -317,11 +325,13 @@ def chat(
             fallback_min_confidence=35,
         )
         live_sources = [r["url"] for r in web_results if r["url"]]
-        web_context_block = format_verified_web_results(web_results)
+        web_context_block = build_web_context_block(request.question, web_results)
 
     # -- 4. Build prompt messages ---------------------------------------------
     user_pref = _get_or_create_preferences(db, user_id)
     memory_block = _memory_block(db, user_id) if request.use_memory else ""
+    raw_history = [{"role": m.role, "content": m.content} for m in request.conversation_history]
+    history_messages, history_block = build_relevant_history(request.question, raw_history)
 
     lang_rule = (
         f"- Respond entirely in {request.language}.\n"
@@ -352,6 +362,7 @@ def chat(
             "- Do not fabricate information.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nCombined document context:\n" + context
         )
@@ -375,6 +386,7 @@ def chat(
             "- Do not fabricate information.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nDocument Context:\n" + context + "\n\n" + web_context_block
         )
@@ -388,14 +400,14 @@ def chat(
             "- Do not fabricate information. If the answer is not in the context, say so.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nDocument context:\n" + context
         )
 
     system_message = {"role": "system", "content": system_content}
-    history = [{"role": m.role, "content": m.content} for m in request.conversation_history]
     user_message = {"role": "user", "content": request.question}
-    messages = [system_message] + history + [user_message]
+    messages = [system_message] + history_messages + [user_message]
 
     # -- 5. Call LLM ---------------------------------------------------------
     try:
@@ -519,12 +531,15 @@ def chat_stream(
         results = vector_store.max_marginal_relevance_search(
             request.question, k=k_value, fetch_k=MMR_FETCH_K
         )
-        doc_context = "\n\n---\n\n".join(chunk.page_content for chunk in results)
         title = doc_by_id[doc_id].doc_title or doc_by_id[doc_id].filename
-        context_parts.append(f"[Document {doc_id}: {title}]\n{doc_context}")
-        contradiction_inputs.append(
-            f"Document {doc_id} ({title}) excerpt:\n{doc_context[:1800]}"
+        doc_context, contradiction_excerpt = build_document_context_block(
+            request.question,
+            title,
+            doc_id,
+            results,
         )
+        context_parts.append(doc_context)
+        contradiction_inputs.append(contradiction_excerpt)
 
     context = "\n\n====================\n\n".join(context_parts)
     contradiction_report: List[str] = []
@@ -549,11 +564,13 @@ def chat_stream(
             fallback_min_confidence=35,
         )
         live_sources = [r["url"] for r in web_results if r["url"]]
-        web_context_block = format_verified_web_results(web_results)
+        web_context_block = build_web_context_block(request.question, web_results)
 
     # -- 4. Build prompt messages ---------------------------------------------
     user_pref = _get_or_create_preferences(db, user_id)
     memory_block = _memory_block(db, user_id) if request.use_memory else ""
+    raw_history = [{"role": m.role, "content": m.content} for m in request.conversation_history]
+    history_messages, history_block = build_relevant_history(request.question, raw_history)
 
     lang_rule = (
         f"- Respond entirely in {request.language}.\n"
@@ -582,6 +599,7 @@ def chat_stream(
             "- Do not fabricate information.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nCombined document context:\n" + context
         )
@@ -602,6 +620,7 @@ def chat_stream(
             "- Do not fabricate information.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nDocument Context:\n" + context + "\n\n" + web_context_block
         )
@@ -615,14 +634,14 @@ def chat_stream(
             "- Do not fabricate information. If the answer is not in the context, say so.\n"
             + preference_rule + lang_rule + MARKDOWN_RULE + contradiction_rule
             + ("\n" + memory_block + "\n" if memory_block else "")
+            + ("\n" + history_block + "\n" if history_block else "")
             + ("\nDetected contradiction hints:\n- " + "\n- ".join(contradiction_report) + "\n" if contradiction_report else "")
             + "\nDocument context:\n" + context
         )
 
     system_message = {"role": "system", "content": system_content}
-    history = [{"role": m.role, "content": m.content} for m in request.conversation_history]
     user_message = {"role": "user", "content": request.question}
-    messages = [system_message] + history + [user_message]
+    messages = [system_message] + history_messages + [user_message]
 
     # -- 5. Generator: stream tokens then emit done ---------------------------
     def generate():
@@ -695,6 +714,164 @@ def chat_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Web-only chat (no document required) — streaming SSE
+# ---------------------------------------------------------------------------
+
+class WebOnlyChatRequest(BaseModel):
+    question: str
+    provider: Literal["groq", "openai"] = DEFAULT_LLM_PROVIDER
+    model: Optional[str] = None
+    conversation_history: List[Message] = []
+    language: str = "English"
+    use_memory: bool = True
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def blank_model_to_none(cls, v):
+        if v == "" or v == "string":
+            return None
+        return v
+
+
+@router.post("/chat/web/stream")
+def chat_web_stream(
+    request: WebOnlyChatRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Live-web-search-only chat: answer any question using real-time web scraping.
+    No document upload required.
+
+    SSE event types:
+      {"type": "token",  "content": "<text>"}          — one LLM token
+      {"type": "done",   "conversation_id": int,
+                         "conversation_history": [...],
+                         "live_sources": [...],
+                         "follow_up_questions": [...]}  — final metadata
+      {"type": "error",  "detail": "<message>"}         — fatal error
+    """
+    user_id = current_user["id"]
+
+    # Live web search (always on)
+    web_results = web_search_verified(
+        request.question,
+        max_results=8,
+        min_confidence=WEB_MIN_CONFIDENCE,
+        trusted_only=False,
+        fallback_to_untrusted=True,
+        fallback_min_confidence=20,
+        scrape_content=True,
+    )
+    live_sources = [r["url"] for r in web_results if r["url"]]
+    web_context_block = build_web_context_block(request.question, web_results)
+
+    user_pref = _get_or_create_preferences(db, user_id)
+    memory_block = _memory_block(db, user_id) if request.use_memory else ""
+    raw_history = [{"role": m.role, "content": m.content} for m in request.conversation_history]
+    history_messages, history_block = build_relevant_history(request.question, raw_history)
+
+    lang_rule = (
+        f"- Respond entirely in {request.language}.\n"
+        if request.language and request.language.lower() != "english"
+        else f"- Respond entirely in {user_pref.language}.\n"
+    )
+
+    system_content = (
+        "You are a powerful AI assistant with live internet access.\n"
+        "You have been given real-time web search results fetched and scraped from multiple websites.\n\n"
+        "Rules:\n"
+        "- Answer the question directly and concisely using the web search results below.\n"
+        "- Prefer results from trusted, high-confidence sources.\n"
+        "- For time-sensitive information (live scores, stock prices, weather), use the most "
+        "recent data available and clearly state the time/date if mentioned in the source.\n"
+        "- Always cite your sources with the URL and confidence percentage.\n"
+        "- If the web results contain scraped page content, extract the most relevant parts.\n"
+        "- If no results have the exact answer, synthesize the best available information "
+        "and be transparent about the limitation.\n"
+        "- Format your response using Markdown only (no HTML tags).\n"
+        f"- Preferred tone: {user_pref.response_tone}.\n"
+        f"- Preferred answer length: {user_pref.response_length}.\n"
+        + lang_rule
+        + ("\n" + memory_block + "\n" if memory_block else "")
+        + ("\n" + history_block + "\n" if history_block else "")
+        + "\n\nLive Web Search Results:\n" + web_context_block
+    )
+
+    system_message = {"role": "system", "content": system_content}
+    user_message = {"role": "user", "content": request.question}
+    messages = [system_message] + history_messages + [user_message]
+
+    def generate():
+        collected: List[str] = []
+        try:
+            for token in stream_llm_response(
+                messages, provider=request.provider, model=request.model
+            ):
+                collected.append(token)
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            return
+
+        answer = "".join(collected)
+
+        # Follow-up questions
+        follow_up_questions: List[str] = []
+        try:
+            fu_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You suggest exactly 3 short follow-up questions a user might ask next, "
+                        "based on the answer given. Respond with ONLY a JSON array of 3 strings."
+                    ),
+                },
+                {"role": "user", "content": f"Question: {request.question}\nAnswer: {answer}"},
+            ]
+            raw_fu = get_llm_response(fu_messages, provider=request.provider, model=request.model)
+            raw_fu = raw_fu.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            follow_up_questions = json.loads(raw_fu)
+            if not isinstance(follow_up_questions, list):
+                follow_up_questions = []
+        except Exception:
+            follow_up_questions = []
+
+        # Persist (use document_id=0 as a sentinel for web-only conversations)
+        updated_history = request.conversation_history + [
+            Message(role="user", content=request.question),
+            Message(role="assistant", content=answer),
+        ]
+        conv = Conversation(
+            user_id=user_id,
+            document_id=0,
+            question=request.question,
+            answer=answer,
+            conversation_history=json.dumps([m.model_dump() for m in updated_history]),
+        )
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+
+        done_payload = {
+            "type": "done",
+            "conversation_id": conv.id,
+            "conversation_history": [m.model_dump() for m in updated_history],
+            "live_sources": live_sources,
+            "follow_up_questions": follow_up_questions,
+            "contradiction_report": [],
+            "used_document_ids": [],
+        }
+        yield f"data: {json.dumps(done_payload)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

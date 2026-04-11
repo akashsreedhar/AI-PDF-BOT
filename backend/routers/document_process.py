@@ -9,11 +9,11 @@ from sqlalchemy.orm import Session
 from config import DEFAULT_LLM_PROVIDER
 from database import get_db
 from models import Document
-from utils.rag_builder import build_faiss_index, load_faiss_index
+from utils.rag_builder import build_faiss_index, load_faiss_index, SUPPORTED_EXTENSIONS, get_index_path
 from utils.authentication import get_current_user
 from utils.llm_client import get_llm_response
 
-ALLOWED_EXTENSIONS = {".pdf", ".txt"}
+ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 router = APIRouter()
 
@@ -32,7 +32,7 @@ router = APIRouter()
                             "files": {
                                 "type": "array",
                                 "items": {"type": "string", "format": "binary"},
-                                "description": "One or more PDF or TXT files",
+                                "description": "Upload one or more supported files (pdf, txt, md, docx, csv, xlsx, json, html, pptx, png, jpg, jpeg, webp, bmp, tiff)",
                             }
                         },
                     }
@@ -48,8 +48,8 @@ def upload_documents(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Accept one or more PDF/TXT files, persist each file to disk,
-    build a per-document FAISS vector index, and record metadata in the DB.
+    Accept one or more supported files, extract text, build a per-document
+    FAISS vector index, and record metadata in the DB.
     """
     user_id = current_user["id"]  # already int from get_current_user
     results = []
@@ -59,7 +59,7 @@ def upload_documents(
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported file type '{ext}'. Allowed types: PDF, TXT.",
+                detail=f"Unsupported file type '{ext}'. Allowed types: {', '.join(sorted(ALLOWED_EXTENSIONS))}.",
             )
 
         # Read entire file into memory — we do NOT persist it to disk
@@ -175,9 +175,17 @@ def delete_document(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
 
-    # Remove FAISS index directory
-    if doc.faiss_index_path and os.path.exists(doc.faiss_index_path):
-        shutil.rmtree(doc.faiss_index_path, ignore_errors=True)
+    # Remove FAISS index from both stored path and canonical path.
+    # This keeps cleanup robust for older records and path format changes.
+    candidate_paths = {p for p in [doc.faiss_index_path, get_index_path(user_id, doc.id)] if p}
+    for path in candidate_paths:
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
 
     db.delete(doc)
     db.commit()

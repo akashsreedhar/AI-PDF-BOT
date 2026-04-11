@@ -85,7 +85,6 @@ function WritingHuman() {
 export default function AgentThinking({ phase }: Props) {
   const [thought, setThought] = useState(0);
   const [dots, setDots]       = useState(0);
-  const [flash, setFlash]     = useState(false);
 
   useEffect(() => {
     if (phase !== "thinking") return;
@@ -97,10 +96,6 @@ export default function AgentThinking({ phase }: Props) {
     const id = setInterval(() => setDots((d) => (d + 1) % 4), 450);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (phase === "producing") { setFlash(true); setTimeout(() => setFlash(false), 600); }
-  }, [phase]);
 
   return (
     <div className="flex items-start gap-3 w-full">
@@ -115,7 +110,7 @@ export default function AgentThinking({ phase }: Props) {
           transition: "filter 0.7s ease",
         }}
       >
-        {flash && (
+        {phase === "producing" && (
           <div className="absolute inset-0 rounded-2xl z-10 pointer-events-none"
             style={{background:"rgba(16,185,129,0.3)", animation:"flashOut 0.6s ease forwards"}}/>
         )}

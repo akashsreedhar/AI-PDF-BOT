@@ -1,10 +1,29 @@
 "use client";
 // app/signup/page.tsx
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signupUser } from "../../services/auth";
+import { googleAuth, signupUser } from "../../services/auth";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: {
+            client_id: string;
+            callback: (response: { credential?: string }) => void;
+          }) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: Record<string, string | number>
+          ) => void;
+        };
+      };
+    };
+  }
+}
 
 const perks = [
   { icon: "⚡", text: "Lightning-fast AI responses" },
@@ -15,6 +34,8 @@ const perks = [
 
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [resolvedGoogleClientId, setResolvedGoogleClientId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
@@ -23,6 +44,34 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [success, setSuccess] = useState(false);
   const router = useRouter();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
+  useEffect(() => {
+    if (googleClientId) {
+      setResolvedGoogleClientId(googleClientId);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchGoogleConfig = async () => {
+      try {
+        const res = await fetch("/api/google-config");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && data?.enabled && data?.client_id) {
+          setResolvedGoogleClientId(data.client_id);
+        }
+      } catch {
+        // Keep the UI fallback message when config is unavailable.
+      }
+    };
+
+    void fetchGoogleConfig();
+    return () => {
+      isMounted = false;
+    };
+  }, [googleClientId]);
 
   // Password strength
   const getStrength = (pw: string) => {
@@ -56,6 +105,29 @@ export default function SignupPage() {
     }
   };
 
+  const handleGoogleCredential = useCallback(async (credential?: string) => {
+    if (!credential) {
+      setError("Google sign up failed. Please try again.");
+      return;
+    }
+
+    setError(null);
+    setIsGoogleLoading(true);
+    try {
+      const result = await googleAuth({ idToken: credential });
+      if (result.token) {
+        localStorage.setItem("jwt", result.token);
+        localStorage.setItem("user", JSON.stringify(result.user));
+      }
+      setSuccess(true);
+      setTimeout(() => router.push("/dashboard"), 800);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Google sign up failed. Please try again.");
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  }, [router]);
+
   // Parallax tilt on card
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -81,6 +153,45 @@ export default function SignupPage() {
       card.removeEventListener("mouseenter", handleEnter);
     };
   }, []);
+
+  useEffect(() => {
+    if (!resolvedGoogleClientId || !googleButtonRef.current) return;
+
+    const initGoogleButton = () => {
+      if (!window.google?.accounts?.id || !googleButtonRef.current) return;
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.initialize({
+        client_id: resolvedGoogleClientId,
+        callback: (response) => {
+          void handleGoogleCredential(response.credential);
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "pill",
+        width: 340,
+      });
+    };
+
+    if (window.google?.accounts?.id) {
+      initGoogleButton();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = initGoogleButton;
+    document.body.appendChild(script);
+
+    return () => {
+      script.onload = null;
+    };
+  }, [resolvedGoogleClientId, handleGoogleCredential]);
 
   return (
     <div className="relative min-h-screen flex items-center justify-center px-4 py-16 overflow-hidden">
@@ -267,7 +378,7 @@ export default function SignupPage() {
                 <div className="animate-fade-up delay-700 pt-1">
                   <button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isLoading || isGoogleLoading}
                     className="btn-primary shimmer-btn w-full relative overflow-hidden py-3.5 rounded-xl text-white font-bold text-base flex items-center justify-center gap-2.5"
                   >
                     {isLoading ? (
@@ -289,6 +400,24 @@ export default function SignupPage() {
                   </button>
                 </div>
               </form>
+
+              <div className="animate-fade-up delay-750 flex items-center gap-4 my-6">
+                <div className="flex-1 h-px" style={{background:"rgba(255,255,255,0.07)"}}/>
+                <span className="text-xs text-white/25 font-medium">or continue with</span>
+                <div className="flex-1 h-px" style={{background:"rgba(255,255,255,0.07)"}}/>
+              </div>
+
+              <div className="animate-fade-up delay-800 flex justify-center min-h-[44px]">
+                {resolvedGoogleClientId ? (
+                  <div ref={googleButtonRef} aria-label="Sign up with Google" />
+                ) : (
+                  <p className="text-xs text-white/35">Google sign up is unavailable. Configure GOOGLE_CLIENT_ID in backend or NEXT_PUBLIC_GOOGLE_CLIENT_ID in frontend.</p>
+                )}
+              </div>
+
+              {isGoogleLoading && (
+                <p className="text-center text-xs text-white/35 mt-3">Signing you in with Google...</p>
+              )}
 
               {/* Sign in link */}
               <p className="animate-fade-up delay-800 text-center text-sm text-white/35 mt-6">

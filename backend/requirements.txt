@@ -14,8 +14,16 @@ langchain-community
 langchain-huggingface
 sentence-transformers
 pypdf
+pandas
+python-docx
+python-pptx
+beautifulsoup4
+requests
+pillow
+pytesseract
 groq
 openai
 ddgs
 resend
 google-cloud-storage
+google-auth
